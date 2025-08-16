@@ -34,14 +34,11 @@ dependencies {
 
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 
-    // spigot
-    compileOnly("org.spigotmc:spigot-api:1.19.2-R0.1-SNAPSHOT")
+    // paper / spigot
+    compileOnly("io.papermc.paper:paper-api:1.20.1-R0.1-SNAPSHOT")
 
     // bungeecord
     compileOnly("net.md-5:bungeecord-api:1.19-R0.1-SNAPSHOT")
-
-    // paper spigot
-    compileOnly("io.papermc.paper:paper-api:1.19.2-R0.1-SNAPSHOT")
 
     // velocity
     compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
@@ -94,6 +91,11 @@ tasks {
             copy {
                 from(shadowJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Velocity/plugins")
+            }
+
+            copy {
+                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                into("../minecraft test servers/Folia/plugins")
             }
         }
     }

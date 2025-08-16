@@ -11,20 +11,41 @@ import org.bukkit.command.CommandMap
 import org.bukkit.event.HandlerList
 import org.bukkit.plugin.java.JavaPlugin
 import java.net.URLClassLoader
+import java.util.function.Consumer
 import java.util.logging.Logger
 
 class SpigotMain : JavaPlugin(), PanoPluginMain {
     private lateinit var pano: Pano
     private val commands = mutableListOf<SpigotCommand>()
-    private val scheduledTasks = mutableMapOf<() -> Unit, Int>()
+    private val scheduledTasks = mutableMapOf<() -> Unit, Any>()
     private val serverData by lazy { SpigotServerData(this) }
 
     override fun onEnable() {
         pano = Pano.init(this)
 
-        server.scheduler.scheduleSyncDelayedTask(this) {
-            if (::pano.isInitialized) {
-                pano.onServerStart()
+        if (SpigotServerUtil.isFolia()) {
+            try {
+                val scheduler = server.javaClass.getMethod("getGlobalRegionScheduler").invoke(server)
+                val runDelayed = scheduler.javaClass.getMethod(
+                    "runDelayed",
+                    org.bukkit.plugin.Plugin::class.java,
+                    Consumer::class.java,
+                    Long::class.javaPrimitiveType
+                )
+                val task = Consumer<Any> {
+                    if (::pano.isInitialized) {
+                        pano.onServerStart()
+                    }
+                }
+                runDelayed.invoke(scheduler, this, task, 1L)
+            } catch (exception: Exception) {
+                logger.severe("Failed to schedule start task: ${exception.message}")
+            }
+        } else {
+            server.scheduler.scheduleSyncDelayedTask(this) {
+                if (::pano.isInitialized) {
+                    pano.onServerStart()
+                }
             }
         }
     }
@@ -71,11 +92,39 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
             stopSchedule(task)
         }
 
-        scheduledTasks[task] = server.scheduler.scheduleSyncRepeatingTask(this, task, 1, 20)
+        if (SpigotServerUtil.isFolia()) {
+            try {
+                val scheduler = server.javaClass.getMethod("getGlobalRegionScheduler").invoke(server)
+                val runAtFixedRate = scheduler.javaClass.getMethod(
+                    "runAtFixedRate",
+                    org.bukkit.plugin.Plugin::class.java,
+                    Consumer::class.java,
+                    Long::class.javaPrimitiveType,
+                    Long::class.javaPrimitiveType
+                )
+                val consumer = Consumer<Any> { _ -> task() }
+                val scheduled = runAtFixedRate.invoke(scheduler, this, consumer, 1L, 20L)
+                scheduledTasks[task] = scheduled
+            } catch (exception: Exception) {
+                logger.severe("Failed to schedule task: ${exception.message}")
+            }
+        } else {
+            scheduledTasks[task] = server.scheduler.scheduleSyncRepeatingTask(this, task, 1, 20)
+        }
     }
 
     override fun stopSchedule(task: () -> Unit) {
-        scheduledTasks[task]?.let { server.scheduler.cancelTask(it) }
+        scheduledTasks[task]?.let { scheduled ->
+            if (SpigotServerUtil.isFolia()) {
+                try {
+                    scheduled.javaClass.getMethod("cancel").invoke(scheduled)
+                } catch (exception: Exception) {
+                    logger.severe("Failed to cancel task: ${exception.message}")
+                }
+            } else {
+                server.scheduler.cancelTask(scheduled as Int)
+            }
+        }
         scheduledTasks.remove(task)
     }
 

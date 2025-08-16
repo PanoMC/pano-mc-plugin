@@ -4,18 +4,31 @@ import com.panomc.plugins.pano.core.ServerType
 
 object SpigotServerUtil {
 
-    fun detectServerType(): ServerType {
+    fun isFolia(): Boolean {
         return try {
-            Class.forName("com.destroystokyo.paper.PaperConfig")
-            ServerType.PAPER
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer")
+            true
         } catch (_: ClassNotFoundException) {
-            val name = org.bukkit.Bukkit.getName().lowercase()
-            val version = org.bukkit.Bukkit.getVersion().lowercase()
-            when {
-                name.contains("paper", true) -> ServerType.PAPER
-                name.contains("spigot", true) || version.contains("spigot", true) -> ServerType.SPIGOT
-                name.contains("bukkit", true) -> ServerType.BUKKIT
-                else -> ServerType.SPIGOT
+            false
+        }
+    }
+
+    fun detectServerType(): ServerType {
+        return if (isFolia()) {
+            ServerType.FOLIA
+        } else {
+            try {
+                Class.forName("com.destroystokyo.paper.PaperConfig")
+                ServerType.PAPER
+            } catch (_: ClassNotFoundException) {
+                val name = org.bukkit.Bukkit.getName().lowercase()
+                val version = org.bukkit.Bukkit.getVersion().lowercase()
+                when {
+                    name.contains("paper", true) -> ServerType.PAPER
+                    name.contains("spigot", true) || version.contains("spigot", true) -> ServerType.SPIGOT
+                    name.contains("bukkit", true) -> ServerType.BUKKIT
+                    else -> ServerType.SPIGOT
+                }
             }
         }
     }
