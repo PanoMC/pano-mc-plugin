@@ -41,6 +41,7 @@ dependencies {
     minecraft("com.mojang:minecraft:1.21.4")
     mappings("net.fabricmc:yarn:1.21.4+build.2:v2")
     modCompileOnly("net.fabricmc:fabric-loader:0.17.2")
+    // Bundle Fabric API via jar-in-jar so servers don't need a separate download
     modImplementation("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
     include("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
 
@@ -163,6 +164,8 @@ tasks {
             exclude(dependency("net.fabricmc:yarn"))
             exclude(dependency("net.fabricmc:intermediary"))
             exclude(dependency("net.fabricmc:fabric-loader"))
+            // Keep Fabric API as a nested jar rather than shading its classes
+            exclude(dependency("net.fabricmc.fabric-api:fabric-api"))
         }
         exclude("net/minecraft/**", "com/mojang/**")
 
