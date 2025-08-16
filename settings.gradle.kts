@@ -1,2 +1,2 @@
-rootProject.name = "Pano MC Plugin"
+rootProject.name = "pano-mc-plugin"
 
