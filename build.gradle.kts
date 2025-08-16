@@ -154,6 +154,14 @@ tasks {
         relocate("com.fasterxml.jackson", "com.panomc.shadow.jackson")
         relocate("io.netty", "vertx.io.netty")
 
+        // Exclude Minecraft and mapping jars from the shaded output to keep the
+        // final artifact slim. These are only needed during compilation.
+        dependencies {
+            exclude(dependency("com.mojang:minecraft"))
+            exclude(dependency("net.fabricmc:yarn"))
+            exclude(dependency("net.fabricmc:intermediary"))
+        }
+
         archiveFileName.set("${rootProject.name}-${version}.jar")
 
         if (project.gradle.startParameter.taskNames.contains("publish")) {
