@@ -11,6 +11,7 @@ import org.bukkit.command.CommandMap
 import org.bukkit.event.HandlerList
 import org.bukkit.plugin.java.JavaPlugin
 import java.net.URLClassLoader
+import java.util.function.Consumer
 import java.util.logging.Logger
 
 class SpigotMain : JavaPlugin(), PanoPluginMain {
@@ -28,14 +29,15 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
                 val runDelayed = scheduler.javaClass.getMethod(
                     "runDelayed",
                     org.bukkit.plugin.Plugin::class.java,
-                    Runnable::class.java,
+                    Consumer::class.java,
                     Long::class.javaPrimitiveType
                 )
-                runDelayed.invoke(scheduler, this, Runnable {
+                val task = Consumer<Any> {
                     if (::pano.isInitialized) {
                         pano.onServerStart()
                     }
-                }, 1L)
+                }
+                runDelayed.invoke(scheduler, this, task, 1L)
             } catch (exception: Exception) {
                 logger.severe("Failed to schedule start task: ${exception.message}")
             }
@@ -96,11 +98,12 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
                 val runAtFixedRate = scheduler.javaClass.getMethod(
                     "runAtFixedRate",
                     org.bukkit.plugin.Plugin::class.java,
-                    Runnable::class.java,
+                    Consumer::class.java,
                     Long::class.javaPrimitiveType,
                     Long::class.javaPrimitiveType
                 )
-                val scheduled = runAtFixedRate.invoke(scheduler, this, Runnable { task() }, 1L, 20L)
+                val consumer = Consumer<Any> { _ -> task() }
+                val scheduled = runAtFixedRate.invoke(scheduler, this, consumer, 1L, 20L)
                 scheduledTasks[task] = scheduled
             } catch (exception: Exception) {
                 logger.severe("Failed to schedule task: ${exception.message}")
