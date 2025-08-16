@@ -50,7 +50,6 @@ dependencies {
 
     // fabric
     compileOnly("net.fabricmc:fabric-loader:0.16.14")
-    compileOnly("net.fabricmc:fabric-language-kotlin:1.12.2+kotlin.2.2.0")
     compileOnly("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
 
     implementation("io.vertx:vertx-core:$vertxVersion")

@@ -7,6 +7,7 @@ import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import net.fabricmc.api.DedicatedServerModInitializer
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.command.ServerCommandSource
@@ -31,7 +32,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         this.server = server
         pano = Pano.init(this)
 
-        server.execute {
+        ServerLifecycleEvents.SERVER_STARTED.register {
             if (::pano.isInitialized) {
                 pano.onServerStart()
             }
