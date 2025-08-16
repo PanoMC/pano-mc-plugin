@@ -139,6 +139,7 @@ tasks {
     }
 
     shadowJar {
+        configurations = listOf(project.configurations.compileClasspath.get())
         manifest {
             val attrMap = mutableMapOf<String, String>()
 
@@ -161,6 +162,7 @@ tasks {
             exclude(dependency("net.fabricmc:yarn"))
             exclude(dependency("net.fabricmc:intermediary"))
         }
+        exclude("net/minecraft/**", "com/mojang/**")
 
         archiveFileName.set("${rootProject.name}-${version}.jar")
 
