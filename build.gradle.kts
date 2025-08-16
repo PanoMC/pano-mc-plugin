@@ -40,8 +40,8 @@ dependencies {
 
     minecraft("com.mojang:minecraft:1.21.4")
     mappings("net.fabricmc:yarn:1.21.4+build.2:v2")
-    modImplementation("net.fabricmc:fabric-loader:0.16.14")
-    modImplementation("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
+    modCompileOnly("net.fabricmc:fabric-loader:0.16.14")
+    modCompileOnly("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
 
     // spigot
     compileOnly("org.spigotmc:spigot-api:1.19.2-R0.1-SNAPSHOT")
