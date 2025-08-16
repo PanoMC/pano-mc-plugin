@@ -1,0 +1,11 @@
+{
+  "id": "pano",
+  "name": "Pano",
+  "version": "${version}",
+  "main": "com.panomc.plugins.pano.velocity.VelocityMain",
+  "description": "An advanced web platform for Minecraft servers.",
+  "authors": [
+    "Pano"
+  ],
+  "url": "https://panomc.com"
+}

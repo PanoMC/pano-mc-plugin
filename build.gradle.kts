@@ -72,34 +72,11 @@ tasks.processResources {
     filesMatching("bungee.yml") {
         expand(mapOf("version" to version))
     }
-}
-val genDir = layout.buildDirectory.dir("generated/sources/buildconfig/kotlin")
-sourceSets.main { kotlin.srcDir(genDir) }
 
-val generateBuildConfig by tasks.registering {
-    outputs.dir(genDir)
-    doLast {
-        val pkg = "com.panomc.plugins.pano.velocity"
-        val outFile = genDir.get().file("$pkg/BuildConfig.kt").asFile
-        outFile.parentFile.mkdirs()
-        outFile.writeText(
-            """
-            package $pkg
-            
-            object BuildConfig {
-                const val VERSION = "${project.version}"
-            }
-            """.trimIndent()
-        )
+    filesMatching("velocity-plugin.json") {
+        expand(mapOf("version" to version))
     }
 }
-
-tasks.named("compileKotlin") { dependsOn(generateBuildConfig) }
-
-tasks.matching { it.name == "kaptKotlin" || it.name == "kaptGenerateStubsKotlin" }
-    .configureEach { dependsOn(generateBuildConfig) }
-
-tasks.named("compileKotlin") { dependsOn("generateBuildConfig") }
 
 tasks {
     register("copyJar") {
