@@ -1,5 +1,7 @@
 name: Pano
 main: com.panomc.plugins.pano.spigot.SpigotMain
+folia-supported: true
+folia-main: com.panomc.plugins.pano.folia.FoliaMain
 version: ${version}
 author: Pano MC
 description: An advanced web platform for Minecraft servers.
