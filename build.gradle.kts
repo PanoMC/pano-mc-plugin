@@ -92,45 +92,47 @@ tasks.processResources {
 
 tasks {
     val shadowJar by existing(ShadowJar::class)
-    val remapJar by existing(RemapJarTask::class) {
-        inputFile.set(shadowJar.flatMap { it.archiveFile })
-        dependsOn(shadowJar)
+
+    // Disable Loom's remapJar tasks to speed up builds
+    withType<RemapJarTask>().configureEach {
+        enabled = false
     }
 
     register("copyJar") {
-        dependsOn(remapJar)
+        dependsOn(shadowJar)
         doLast {
+            val jarFile = shadowJar.get().archiveFile.get().asFile
             copy {
-                from(remapJar.get().archiveFile.get().asFile.absolutePath)
+                from(jarFile)
                 into("../minecraft test servers/Spigot/plugins")
             }
 
             copy {
-                from(remapJar.get().archiveFile.get().asFile.absolutePath)
+                from(jarFile)
                 into("../minecraft test servers/Bungeecord/plugins")
             }
 
             copy {
-                from(remapJar.get().archiveFile.get().asFile.absolutePath)
+                from(jarFile)
                 into("../minecraft test servers/Velocity/plugins")
             }
 
             copy {
-                from(remapJar.get().archiveFile.get().asFile.absolutePath)
+                from(jarFile)
                 into("../minecraft test servers/Fabric/mods")
             }
         }
     }
 
     build {
-        dependsOn(remapJar)
+        dependsOn(shadowJar)
     }
 
     register("buildDev") {
         dependsOn("build")
     }
 
-    // This task builds and copys jar into server folders for test
+    // This task builds and copies jar into server folders for test
     register("buildPluginDev") {
         dependsOn("buildDev")
         dependsOn("copyJar")
