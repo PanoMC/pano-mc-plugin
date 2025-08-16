@@ -1,6 +1,6 @@
 name: Pano
 main: com.panomc.plugins.pano.spigot.SpigotMain
-version: 1.0
+version: ${version}
 author: Pano MC
 description: An advanced web platform for Minecraft servers.
 website: http://panomc.com

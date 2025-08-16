@@ -24,7 +24,7 @@ import java.util.logging.Logger
 @Plugin(
     id = "pano",
     name = "Pano",
-    version = "1.0-alpha",
+    version = BuildConfig.VERSION, // <- compile-time const
     url = "https://panomc.com",
     description = "An advanced web platform for Minecraft servers.",
     authors = ["Pano MC"]
