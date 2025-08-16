@@ -23,6 +23,7 @@ repositories {
     maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
     maven("https://jitpack.io")
     maven("https://repo.papermc.io/repository/maven-public/")
+    maven("https://maven.fabricmc.net/")
     maven {
         name = "papermc"
         url = uri("https://repo.papermc.io/repository/maven-public/")
@@ -46,6 +47,11 @@ dependencies {
     // velocity
     compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
     annotationProcessor("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
+
+    // fabric
+    compileOnly("net.fabricmc:fabric-loader:0.16.14")
+    compileOnly("net.fabricmc:fabric-language-kotlin:1.12.2+kotlin.2.2.0")
+    compileOnly("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
 
     implementation("io.vertx:vertx-core:$vertxVersion")
     implementation("io.vertx:vertx-web-client:$vertxVersion")
@@ -76,6 +82,10 @@ tasks.processResources {
     filesMatching("velocity-plugin.json") {
         expand(mapOf("version" to version))
     }
+
+    filesMatching("fabric.mod.json") {
+        expand(mapOf("version" to version))
+    }
 }
 
 tasks {
@@ -94,6 +104,11 @@ tasks {
             copy {
                 from(shadowJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Velocity/plugins")
+            }
+
+            copy {
+                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                into("../minecraft test servers/Fabric/mods")
             }
         }
     }
