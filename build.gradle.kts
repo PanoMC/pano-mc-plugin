@@ -69,6 +69,10 @@ tasks.processResources {
         expand(mapOf("version" to version))
     }
 
+    filesMatching("paper-plugin.yml") {
+        expand(mapOf("version" to version))
+    }
+
     filesMatching("bungee.yml") {
         expand(mapOf("version" to version))
     }

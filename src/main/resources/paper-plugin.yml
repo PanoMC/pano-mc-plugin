@@ -1,0 +1,5 @@
+name: Pano
+main: com.panomc.plugins.pano.spigot.SpigotMain
+version: ${version}
+folia-supported: true
+folia-main: com.panomc.plugins.pano.folia.FoliaMain
