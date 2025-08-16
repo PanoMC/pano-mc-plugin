@@ -280,7 +280,7 @@ class PlatformManager(
     private fun onWebSocketClosed() {
         webSocket = null
 
-        logger.info(pluginMain.translateColor("&2Disconnected from the platform."))
+        logger.info(pluginMain.translateColor("&6Disconnected from the platform."))
 
         if (canConnect) {
             logger.info(pluginMain.translateColor("&eRetrying to connect..."))
