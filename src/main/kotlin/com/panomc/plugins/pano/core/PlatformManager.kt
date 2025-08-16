@@ -4,6 +4,7 @@ import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
+import com.panomc.plugins.pano.core.util.ImageUtil
 import io.vertx.core.Vertx
 import io.vertx.core.buffer.Buffer
 import io.vertx.core.http.*
@@ -16,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.awt.image.BufferedImage
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
@@ -124,7 +126,10 @@ class PlatformManager(
 
         if (pingData.faviconImage != null) {
             requestBody
-                .put("favicon", pingData.faviconImage)
+                .put(
+                    "favicon",
+                    if (pingData.faviconImage is BufferedImage) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage) else pingData.faviconImage
+                )
         }
 
         if (pingData.descriptionJson != null) {
@@ -264,7 +269,10 @@ class PlatformManager(
 
         if (pingData.faviconImage != null) {
             eventRequest
-                .put("favicon", pingData.faviconImage)
+                .put(
+                    "favicon",
+                    if (pingData.faviconImage is BufferedImage) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage) else pingData.faviconImage
+                )
         }
 
         if (pingData.descriptionJson != null) {

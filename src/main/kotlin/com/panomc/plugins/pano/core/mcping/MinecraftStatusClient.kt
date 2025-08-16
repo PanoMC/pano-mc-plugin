@@ -172,49 +172,80 @@ class MinecraftStatusClient(
                 else cont.resumeWithException(ar.cause())
             }
         }
-
     /** Read exactly one framed Minecraft packet: [VarInt length][VarInt id][payload…]. */
     private suspend fun readPacket(socket: NetSocket): Buffer =
         suspendCancellableCoroutine { cont ->
             var acc = Buffer.buffer()
+            var readIndex = 0
             var expectedLen: Int? = null
+            val MAX_PACKET_LEN = 2 * 1024 * 1024 // 2 MiB koruma
+
+            fun compactIfNeeded() {
+                // Çok ilerlediysek, tüketilmeyen kısmı yeni bir büyüyebilir buffer'a kopyala
+                if (readIndex > 65536 || readIndex == acc.length()) {
+                    val remaining = acc.length() - readIndex
+                    val fresh = Buffer.buffer(remaining.coerceAtLeast(0))
+                    if (remaining > 0) fresh.appendBuffer(acc.getBuffer(readIndex, acc.length()))
+                    acc = fresh
+                    readIndex = 0
+                }
+            }
 
             val handler = io.vertx.core.Handler<Buffer> { chunk ->
                 acc.appendBuffer(chunk)
+
                 while (true) {
                     if (expectedLen == null) {
-                        val decoded = tryDecodeVarInt(acc) ?: break
-                        val (len, lenBytes) = decoded
+                        // Paket uzunluğu varInt, acc[readIndex..] başlangıcından oku
+                        val lenDecoded = tryDecodeVarIntAt(acc, readIndex) ?: break
+                        val (len, lenBytes) = lenDecoded
+                        require(len in 0..MAX_PACKET_LEN) { "Packet length $len exceeds limit" }
+                        // Uzunluk alanını aş
+                        readIndex += lenBytes
                         expectedLen = len
-                        // Drop the length field from the accumulator
-                        acc = acc.slice(lenBytes, acc.length())
                     }
-                    val need = expectedLen!!
-                    if (acc.length() < need) break
 
-                    // We have one full packet: [VarInt id][payload...]
-                    val packet = acc.slice(0, need)
-                    // Drop consumed bytes and reset for next time
-                    acc = acc.slice(need, acc.length())
+                    val need = expectedLen!!
+                    if (acc.length() - readIndex < need) break
+
+                    // Tam bir paket var: [VarInt id][payload…] uzunluğu = need
+                    val packet = acc.getBuffer(readIndex, readIndex + need)
+                    readIndex += need
                     expectedLen = null
 
-                    // Stop reading and complete with this packet
                     socket.handler(null)
                     cont.resume(packet)
                     return@Handler
                 }
+
+                compactIfNeeded()
             }
 
             socket.handler(handler)
             socket.exceptionHandler { err ->
                 socket.handler(null)
-                cont.resumeWithException(err)
+                if (!cont.isCompleted) cont.resumeWithException(err)
             }
             socket.closeHandler {
                 if (!cont.isCompleted) cont.resumeWithException(IllegalStateException("Socket closed"))
             }
         }
 
+    /** Decode VarInt at absolute [index]; returns (value, bytesConsumed) or null if incomplete. */
+    private fun tryDecodeVarIntAt(buf: Buffer, index: Int): Pair<Int, Int>? {
+        var numRead = 0
+        var result = 0
+        while (true) {
+            if (buf.length() <= index + numRead) return null
+            val read = buf.getByte(index + numRead).toInt() and 0xFF
+            val value = read and 0x7F
+            result = result or (value shl (7 * numRead))
+            numRead++
+            if (numRead > 5) throw IllegalArgumentException("VarInt too big")
+            if ((read and 0x80) == 0) break
+        }
+        return result to numRead
+    }
 
     private suspend fun closeAwait(socket: NetSocket): Unit =
         suspendCancellableCoroutine { cont ->
