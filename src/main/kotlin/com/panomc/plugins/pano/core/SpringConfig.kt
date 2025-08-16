@@ -6,7 +6,7 @@ import com.panomc.plugins.pano.core.event.EventManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.schedule.ScheduleManager
 import io.vertx.core.Vertx
-import io.vertx.core.http.HttpClient
+import io.vertx.core.http.WebSocketClient
 import io.vertx.ext.web.client.WebClient
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.config.ConfigurableBeanFactory
@@ -66,13 +66,13 @@ open class SpringConfig {
         scheduleManager: ScheduleManager,
         configManager: ConfigManager,
         webClient: WebClient,
-        httpClient: HttpClient
+        webSocketClient: WebSocketClient
     ) = PlatformManager(
         vertx,
         panoPluginMain.getLogger(),
         configManager,
         webClient,
-        httpClient,
+        webSocketClient,
         panoPluginMain.getServerData(),
         panoPluginMain
     )
@@ -85,5 +85,5 @@ open class SpringConfig {
     @Bean
     @Lazy
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
-    open fun provideHttpClient(): HttpClient = vertx.createHttpClient()
+    open fun provideWebsocketClient(): WebSocketClient = vertx.createWebSocketClient()
 }

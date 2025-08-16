@@ -1,3 +1,3 @@
-# Pano Core Plugin
+# Pano MC Plugin
 
-Pano core plugin for Spigot/Bungee/PaperSpigot/Velocity.
+Pano MC plugin for Spigot/Bungee/PaperSpigot/Velocity.

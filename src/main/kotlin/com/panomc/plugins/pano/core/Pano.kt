@@ -9,7 +9,7 @@ import com.panomc.plugins.pano.core.schedule.ScheduleManager
 import io.vertx.core.Vertx
 import io.vertx.core.VertxOptions
 import io.vertx.kotlin.coroutines.CoroutineVerticle
-import io.vertx.kotlin.coroutines.await
+import io.vertx.kotlin.coroutines.coAwait
 import kotlinx.coroutines.runBlocking
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import java.net.URLClassLoader
@@ -67,7 +67,7 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
             val pano = Pano(panoPluginMain)
 
             runBlocking {
-                vertx.deployVerticle(pano).await()
+                vertx.deployVerticle(pano).coAwait()
             }
 
             return pano
@@ -99,7 +99,7 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
             )
         )
 
-        logger.info("Initializing Pano Core")
+        logger.info("Initializing Pano MC")
 
         init()
     }

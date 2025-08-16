@@ -11,7 +11,7 @@ import io.vertx.core.http.*
 import io.vertx.core.json.JsonObject
 import io.vertx.ext.web.client.HttpResponse
 import io.vertx.ext.web.client.WebClient
-import io.vertx.kotlin.coroutines.await
+import io.vertx.kotlin.coroutines.coAwait
 import io.vertx.kotlin.coroutines.dispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -25,7 +25,7 @@ class PlatformManager(
     private val logger: Logger,
     private val configManager: ConfigManager,
     private val webClient: WebClient,
-    private val httpClient: HttpClient,
+    private val webSocketClient: WebSocketClient,
     private val serverData: ServerData,
     private val pluginMain: PanoPluginMain
 ) {
@@ -140,7 +140,7 @@ class PlatformManager(
         val response: HttpResponse<*>
 
         try {
-            response = request.await()
+            response = request.coAwait()
         } catch (exception: Exception) {
             logger.severe(exception.message)
 
@@ -176,7 +176,7 @@ class PlatformManager(
             .send()
 
         try {
-            request.await()
+            request.coAwait()
         } catch (exception: Exception) {
             logger.severe(pluginMain.translateColor("&cError: Failed to connect Pano Platform. Reason: ${exception.message}"))
 
@@ -204,7 +204,7 @@ class PlatformManager(
         val webSocket: WebSocket
 
         try {
-            webSocket = httpClient.webSocket(webSocketConnectOptions).await()
+            webSocket = webSocketClient.connect(webSocketConnectOptions).coAwait()
         } catch (exception: Exception) {
             if (exception is UpgradeRejectedException) {
                 val body = exception.body.toJsonObject()
@@ -295,7 +295,7 @@ class PlatformManager(
     }
 
     private suspend fun closeConnection() {
-        webSocket?.close()?.await()
+        webSocket?.close()?.coAwait()
     }
 
     private fun savePlatform(host: String, port: Int, token: String) {

@@ -1,9 +1,9 @@
-val vertxVersion = "4.5.1"
+val vertxVersion = "5.0.3"
 
 plugins {
-    kotlin("jvm") version "1.9.20"
-    kotlin("kapt") version "1.9.20"
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    kotlin("jvm") version "2.2.0"
+    kotlin("kapt") version "2.2.0"
+    id("com.gradleup.shadow") version "8.3.8"
     `maven-publish`
 }
 
@@ -44,8 +44,8 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:1.19.2-R0.1-SNAPSHOT")
 
     // velocity
-    compileOnly("com.velocitypowered:velocity-api:3.1.1")
-    annotationProcessor("com.velocitypowered:velocity-api:3.1.1")
+    compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
+    annotationProcessor("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
 
     implementation("io.vertx:vertx-core:$vertxVersion")
     implementation("io.vertx:vertx-web-client:$vertxVersion")
@@ -56,10 +56,9 @@ dependencies {
     implementation("io.vertx:vertx-json-schema:$vertxVersion")
 
     // https://mvnrepository.com/artifact/com.fasterxml.jackson.core/jackson-databind
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.16.0")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.19.2")
 
-
-    implementation("org.springframework:spring-context:5.3.32")
+    implementation("org.springframework:spring-context:5.3.39")
 }
 
 tasks.named("jar").configure {

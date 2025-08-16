@@ -69,12 +69,14 @@ class VelocityMain : PanoPluginMain {
     private fun onEnable() {
         pano = Pano.init(this)
 
-        server.scheduler
-            .buildTask(this) {
-                if (::pano.isInitialized) {
-                    pano.onServerStart()
-                }
+        val task: () -> Unit = {
+            if (::pano.isInitialized) {
+                pano.onServerStart()
             }
+        }
+
+        server.scheduler
+            .buildTask(this, task)
             .schedule()
     }
 
