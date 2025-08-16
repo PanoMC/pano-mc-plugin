@@ -55,8 +55,7 @@ dependencies {
     implementation("io.vertx:vertx-config-hocon:$vertxVersion")
     implementation("io.vertx:vertx-json-schema:$vertxVersion")
 
-    // https://mvnrepository.com/artifact/com.fasterxml.jackson.core/jackson-databind
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.19.2")
+    implementation("com.fasterxml.jackson.core:jackson-core:2.19.2")
 
     implementation("org.springframework:spring-context:5.3.39")
 }
@@ -111,7 +110,8 @@ tasks {
 
             attributes(attrMap)
         }
-
+        mergeServiceFiles()
+        relocate("com.fasterxml.jackson", "com.panomc.shadow.jackson")
         relocate("io.netty", "vertx.io.netty")
 
         archiveFileName.set("${rootProject.name}-${version}.jar")

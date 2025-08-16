@@ -3,11 +3,12 @@ package com.panomc.plugins.pano.spigot
 import com.panomc.plugins.pano.core.ServerType
 import com.panomc.plugins.pano.core.helper.ServerData
 import org.bukkit.plugin.java.JavaPlugin
+import java.net.InetAddress
 
 class SpigotServerData(private val plugin: JavaPlugin) : ServerData {
     override fun serverName(): String = plugin.server.name
 
-    override fun hostAddress(): String = plugin.server.ip
+    override fun hostAddress(): String = plugin.server.ip.ifBlank { InetAddress.getLocalHost().hostAddress }
 
     override fun motd(): String = plugin.server.motd
 

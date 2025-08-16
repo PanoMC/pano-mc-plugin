@@ -99,5 +99,5 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         HandlerList.unregisterAll(this)
     }
 
-    override fun getLogger(): Logger = ColoredLogger()
+    override fun getLogger(): Logger = ColoredLogger("[Pano] ")
 }

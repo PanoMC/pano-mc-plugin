@@ -1,10 +1,9 @@
 package com.panomc.plugins.pano.core
 
-import ch.jamiete.mcping.MinecraftPing
-import ch.jamiete.mcping.MinecraftPingOptions
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import io.vertx.core.Vertx
 import io.vertx.core.buffer.Buffer
 import io.vertx.core.http.*
@@ -26,6 +25,7 @@ class PlatformManager(
     private val configManager: ConfigManager,
     private val webClient: WebClient,
     private val webSocketClient: WebSocketClient,
+    private val minecraftStatusClient: MinecraftStatusClient,
     private val serverData: ServerData,
     private val pluginMain: PanoPluginMain
 ) {
@@ -57,17 +57,17 @@ class PlatformManager(
     }
 
     fun start() {
-        logger.info(pluginMain.translateColor("&eChecking is platform connection configured"))
+        logger.info(pluginMain.translateColor("Checking is platform connection configured"))
 
         if (!isPlatformConfigured()) {
-            logger.severe(pluginMain.translateColor("&cThis server has not been connected to any Pano Platform!"))
+            logger.severe(pluginMain.translateColor("&eThis server has not been connected to any Pano Platform!"))
             logger.severe(pluginMain.translateColor("""&6Type: "/pano connect <platform-address> <platform-code>" to connect Pano Platform."""))
             logger.severe(pluginMain.translateColor("""&6For more information please visit: http://panomc.com/platform-connect"""))
 
             return
         }
 
-        logger.info(pluginMain.translateColor("&6Connecting to platform..."))
+        logger.info(pluginMain.translateColor("Connecting to platform..."))
 
         canConnect = true
         connectPlatformTask.invoke(false)
@@ -96,10 +96,9 @@ class PlatformManager(
     }
 
     suspend fun connectNewPlatform(platformAddress: String, platformCode: String) {
-        val pingOptions = MinecraftPingOptions().setHostname(serverData.hostAddress()).setPort(serverData.port())
-        val pingData = MinecraftPing().getPing(pingOptions)
+        val pingData = minecraftStatusClient.query(host = serverData.hostAddress(), port = serverData.port())
 
-        var port = 8080
+        var port = 8088
         var host = platformAddress
 
         if (host.contains(":")) {
@@ -123,14 +122,14 @@ class PlatformManager(
             .put("port", serverData.port())
             .put("startTime", Pano.serverStartTime)
 
-        if (pingData.favicon != null) {
+        if (pingData.faviconImage != null) {
             requestBody
-                .put("favicon", pingData.favicon)
+                .put("favicon", pingData.faviconImage)
         }
 
-        if (pingData.description != null) {
+        if (pingData.descriptionJson != null) {
             requestBody
-                .put("motd", pingData.description.text)
+                .put("motd", pingData.descriptionJson)
         }
 
         val request = webClient
@@ -248,9 +247,8 @@ class PlatformManager(
         }
     }
 
-    private fun onConnectionEstablished() {
-        val pingOptions = MinecraftPingOptions().setHostname(serverData.hostAddress()).setPort(serverData.port())
-        val pingData = MinecraftPing().getPing(pingOptions)
+    private suspend fun onConnectionEstablished() {
+        val pingData = minecraftStatusClient.query(host = serverData.hostAddress(), port = serverData.port())
 
         val eventRequest = createEventRequest(ServerEvent.ON_SERVER_CONNECT)
 
@@ -264,25 +262,25 @@ class PlatformManager(
             .put("port", serverData.port())
             .put("startTime", Pano.serverStartTime)
 
-        if (pingData.favicon != null) {
+        if (pingData.faviconImage != null) {
             eventRequest
-                .put("favicon", pingData.favicon)
+                .put("favicon", pingData.faviconImage)
         }
 
-        if (pingData.description != null) {
+        if (pingData.descriptionJson != null) {
             eventRequest
-                .put("motd", pingData.description.text)
+                .put("motd", pingData.descriptionJson)
         }
 
         webSocket?.writeTextMessage(eventRequest.encode())
 
-        logger.info(pluginMain.translateColor("&eSent server info update to the platform."))
+        logger.info(pluginMain.translateColor("Sent server info update to the platform."))
     }
 
     private fun onWebSocketClosed() {
         webSocket = null
 
-        logger.info(pluginMain.translateColor("&eDisconnected from the platform."))
+        logger.info(pluginMain.translateColor("&2Disconnected from the platform."))
 
         if (canConnect) {
             logger.info(pluginMain.translateColor("&eRetrying to connect..."))

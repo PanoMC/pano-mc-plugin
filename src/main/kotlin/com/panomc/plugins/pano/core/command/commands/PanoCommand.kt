@@ -3,6 +3,7 @@ package com.panomc.plugins.pano.core.command.commands
 import com.panomc.plugins.pano.core.PlatformManager
 import com.panomc.plugins.pano.core.annotation.Command
 import com.panomc.plugins.pano.core.helper.CommandHelper
+import java.io.Console
 
 @Command
 class PanoCommand(
@@ -57,15 +58,12 @@ class PanoCommand(
             return true
         }
 
-        commandHelper.sendMessage(commandSender, "&eConnecting...")
+        commandHelper.sendMessage(commandSender, "Connecting...")
 
         try {
             platformManager.connectNewPlatform(platformAddress, platformCode)
         } catch (exception: Exception) {
-            commandHelper.sendMessage(
-                commandSender,
-                exception.message!!
-            )
+            exception.printStackTrace()
 
             return true
         }
@@ -93,7 +91,7 @@ class PanoCommand(
             return true
         }
 
-        commandHelper.sendMessage(commandSender, "&eDisconnecting...")
+        commandHelper.sendMessage(commandSender, "Disconnecting...")
 
         try {
             platformManager.disconnectPlatform()
@@ -106,7 +104,9 @@ class PanoCommand(
             return true
         }
 
-        commandHelper.sendMessage(commandSender, "&2Disconnected from platform!")
+        if (commandSender !is Console) {
+            commandHelper.sendMessage(commandSender, "&2Disconnected from platform!")
+        }
 
         return true
     }
