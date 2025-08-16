@@ -6,7 +6,6 @@ description: An advanced web platform for Minecraft servers.
 website: http://panomc.com
 api-version: '1.20'
 folia-supported: true
-folia-main: com.panomc.plugins.pano.folia.FoliaMain
 #commands:
 #  pano:
 #    description: Runs Pano commands.

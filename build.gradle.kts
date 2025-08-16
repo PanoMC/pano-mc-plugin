@@ -40,9 +40,6 @@ dependencies {
     // bungeecord
     compileOnly("net.md-5:bungeecord-api:1.19-R0.1-SNAPSHOT")
 
-    // folia
-    compileOnly("dev.folia:folia-api:1.20.1-R0.1-SNAPSHOT")
-
     // velocity
     compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
     annotationProcessor("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
@@ -66,10 +63,6 @@ tasks.named("jar").configure {
 
 tasks.processResources {
     filesMatching("plugin.yml") {
-        expand(mapOf("version" to version))
-    }
-
-    filesMatching("paper-plugin.yml") {
         expand(mapOf("version" to version))
     }
 
