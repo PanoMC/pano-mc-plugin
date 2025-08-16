@@ -11,7 +11,7 @@ class FabricServerData(private val server: MinecraftServer) : ServerData {
     override fun hostAddress(): String =
         if (server.serverIp.isNullOrBlank()) InetAddress.getLocalHost().hostAddress else server.serverIp
 
-    override fun motd(): String = server.motd.string
+    override fun motd(): String = server.serverMotd
 
     override fun port(): Int = server.serverPort
 

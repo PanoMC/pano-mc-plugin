@@ -1,8 +1,11 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+import net.fabricmc.loom.task.RemapJarTask
+
 val vertxVersion = "5.0.3"
 
 plugins {
     kotlin("jvm") version "2.2.0"
-    kotlin("kapt") version "2.2.0"
+    id("fabric-loom") version "1.7.4"
     id("com.gradleup.shadow") version "8.3.8"
     `maven-publish`
 }
@@ -35,6 +38,11 @@ dependencies {
 
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 
+    minecraft("com.mojang:minecraft:1.21.4")
+    mappings("net.fabricmc:yarn:1.21.4+build.2:v2")
+    modImplementation("net.fabricmc:fabric-loader:0.16.14")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
+
     // spigot
     compileOnly("org.spigotmc:spigot-api:1.19.2-R0.1-SNAPSHOT")
 
@@ -46,11 +54,6 @@ dependencies {
 
     // velocity
     compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
-    annotationProcessor("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
-
-    // fabric
-    compileOnly("net.fabricmc:fabric-loader:0.16.14")
-    compileOnly("net.fabricmc.fabric-api:fabric-api:0.115.0+1.21.4")
 
     implementation("io.vertx:vertx-core:$vertxVersion")
     implementation("io.vertx:vertx-web-client:$vertxVersion")
@@ -88,32 +91,39 @@ tasks.processResources {
 }
 
 tasks {
+    val shadowJar by existing(ShadowJar::class)
+    val remapJar by existing(RemapJarTask::class) {
+        inputFile.set(shadowJar.flatMap { it.archiveFile })
+        dependsOn(shadowJar)
+    }
+
     register("copyJar") {
+        dependsOn(remapJar)
         doLast {
             copy {
-                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                from(remapJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Spigot/plugins")
             }
 
             copy {
-                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                from(remapJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Bungeecord/plugins")
             }
 
             copy {
-                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                from(remapJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Velocity/plugins")
             }
 
             copy {
-                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                from(remapJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Fabric/mods")
             }
         }
     }
 
     build {
-        dependsOn(shadowJar)
+        dependsOn(remapJar)
     }
 
     register("buildDev") {
@@ -147,6 +157,7 @@ tasks {
         if (project.gradle.startParameter.taskNames.contains("publish")) {
             archiveFileName.set(archiveFileName.get().lowercase())
         }
+        isZip64 = true
     }
 }
 

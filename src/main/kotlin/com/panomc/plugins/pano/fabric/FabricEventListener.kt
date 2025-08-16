@@ -29,8 +29,7 @@ class FabricEventListener(
     }
 
     fun unregister() {
-        ServerPlayConnectionEvents.JOIN.unregister(joinListener)
-        ServerPlayConnectionEvents.DISCONNECT.unregister(disconnectListener)
+        // Fabric events do not support unregistering
     }
 
     override fun sendMessage(commandSender: Any, message: String) {
@@ -42,7 +41,7 @@ class FabricEventListener(
         return EventHelper.Companion.PlayerData(
             uuid = p.uuid,
             username = p.gameProfile.name,
-            ping = p.ping.toLong()
+            ping = 0L
         )
     }
 }

@@ -28,9 +28,11 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     private val eventListeners = mutableListOf<FabricEventListener>()
     private val serverData by lazy { FabricServerData(server) }
 
-    override fun onInitializeServer(server: MinecraftServer) {
-        this.server = server
-        pano = Pano.init(this)
+    override fun onInitializeServer() {
+        ServerLifecycleEvents.SERVER_STARTING.register { srv ->
+            server = srv
+            pano = Pano.init(this)
+        }
 
         ServerLifecycleEvents.SERVER_STARTED.register {
             if (::pano.isInitialized) {
