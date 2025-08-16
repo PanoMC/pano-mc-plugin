@@ -299,7 +299,6 @@ class PlatformManager(
     private fun savePlatform(host: String, port: Int, token: String) {
         val platformConfig = configManager.getConfig().getJsonObject("platform")
 
-
         platformConfig.put("host", host)
         platformConfig.put("port", port)
         platformConfig.put("token", token)

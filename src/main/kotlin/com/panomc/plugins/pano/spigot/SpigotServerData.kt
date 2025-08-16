@@ -14,7 +14,7 @@ class SpigotServerData(private val plugin: JavaPlugin) : ServerData {
 
     override fun port(): Int = plugin.server.port
 
-    override fun serverType(): ServerType = ServerType.SPIGOT
+    override fun serverType(): ServerType = SpigotServerUtil.detectServerType()
 
     override fun serverVersion(): String = plugin.server.version
 
