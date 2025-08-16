@@ -115,6 +115,8 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
 
         platformManager.stop()
 
+        vertx.close().coAwait()
+
         super.stop()
 
         logger.info("Pano is disabled")
