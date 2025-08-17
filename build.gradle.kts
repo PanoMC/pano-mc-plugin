@@ -34,8 +34,8 @@ dependencies {
 
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 
-    // paper / spigot
-    compileOnly("io.papermc.paper:paper-api:1.20.1-R0.1-SNAPSHOT")
+    // paper / spigot20
+    compileOnly("io.papermc.paper:paper-api:1.17-R0.1-SNAPSHOT")
 
     // bungeecord
     compileOnly("net.md-5:bungeecord-api:1.19-R0.1-SNAPSHOT")
