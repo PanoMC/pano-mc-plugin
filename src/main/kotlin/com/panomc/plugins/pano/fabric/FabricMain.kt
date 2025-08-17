@@ -31,7 +31,23 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     override fun getLogger(): Logger = logger
 
     override fun registerCommands(commands: List<Command>) {
-        // Fabric command registration requires Minecraft classes; not implemented
+        try {
+            val callbackClass = Class.forName("net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback")
+            val eventField = callbackClass.getField("EVENT")
+            val eventInstance = eventField.get(null)
+            val registerMethod = eventInstance.javaClass.getMethod("register", callbackClass)
+            val proxy = java.lang.reflect.Proxy.newProxyInstance(
+                callbackClass.classLoader,
+                arrayOf(callbackClass)
+            ) { _, _, args ->
+                val dispatcher = args[0] as com.mojang.brigadier.CommandDispatcher<Any>
+                commands.forEach { FabricCommand(it, this).register(dispatcher) }
+                null
+            }
+            registerMethod.invoke(eventInstance, proxy)
+        } catch (e: Exception) {
+            logger.severe("Failed to register commands: ${e.message}")
+        }
     }
 
     override fun unregisterCommands(commands: List<Command>) {
@@ -67,7 +83,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     override fun translateColor(text: String): String = text.replace("&", "§")
 
     override fun registerEventListeners(listeners: List<Listener>) {
-        // Fabric events require Minecraft classes; not implemented
+        FabricEventListener(this, listeners).register()
     }
 
     override fun unregisterEventListeners(listeners: List<Listener>) {
