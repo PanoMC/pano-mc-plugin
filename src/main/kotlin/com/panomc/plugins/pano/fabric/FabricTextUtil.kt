@@ -113,7 +113,7 @@ object FabricTextUtil {
             val start = i
             while (i < input.length && input[i] != '§') i++
             val segmentText = input.substring(start, i)
-            val segment = ofMethod.invoke(null, segmentText)
+            var segment = ofMethod.invoke(null, segmentText)
 
             val applied = mutableListOf<Enum<*>>()
             color?.let { applied.add(it) }
@@ -128,7 +128,14 @@ object FabricTextUtil {
                         it.parameterTypes[0].isArray &&
                         it.parameterTypes[0].componentType == formattingClass
                 }
-                formattedMethod?.invoke(segment, array)
+                // Some implementations of formatted() return a new instance
+                // rather than mutating the original text. Capture the return
+                // value to ensure styles are applied regardless of the
+                // underlying behavior.
+                formattedMethod?.let { method ->
+                    val formatted = method.invoke(segment, array)
+                    if (formatted != null) segment = formatted
+                }
             }
 
             result = if (result == null) {
@@ -136,11 +143,10 @@ object FabricTextUtil {
             } else {
                 val appendMethod = result.javaClass.methods.firstOrNull {
                     it.parameterCount == 1 &&
-                        it.parameterTypes[0] == textClass &&
-                        it.returnType == result.javaClass
+                        it.parameterTypes[0] == textClass
                 }
-                appendMethod?.invoke(result, segment)
-                result
+                val appended = appendMethod?.invoke(result, segment)
+                appended ?: result
             }
         }
 
