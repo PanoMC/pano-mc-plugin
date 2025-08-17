@@ -31,15 +31,18 @@ class FabricCommand(private val command: Command, private val pluginMain: PanoPl
         try {
             val textClass = Class.forName("net.minecraft.text.Text")
             val literal = textClass.getMethod("literal", String::class.java)
-            val feedback = commandSender.javaClass.getMethod(
+
+            val source = commandSender.javaClass.getMethod("getSource").invoke(commandSender)
+            val feedback = source.javaClass.getMethod(
                 "sendFeedback",
                 java.util.function.Supplier::class.java,
                 Boolean::class.javaPrimitiveType
             )
+
             val supplier = java.util.function.Supplier {
                 literal.invoke(null, pluginMain.translateColor(message))
             }
-            feedback.invoke(commandSender, supplier, false)
+            feedback.invoke(source, supplier, false)
         } catch (_: Exception) {
             // ignore if Fabric classes are unavailable
         }
