@@ -9,7 +9,7 @@ import java.io.Console
 class PanoCommand(
     private val platformManager: PlatformManager
 ) : com.panomc.plugins.pano.core.command.Command {
-    override val name: String = "Pano"
+    override val name: String = "pano"
     override val permission: String = "pano.admin"
     override val description: String = "Runs Pano commands."
     override val permissionMessage: String = "You do not have permission!"

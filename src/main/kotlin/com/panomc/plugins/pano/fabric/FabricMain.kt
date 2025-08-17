@@ -32,11 +32,14 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         try {
             val lifecycleClass = Class.forName("net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents")
             val startedField = lifecycleClass.getField("SERVER_STARTED")
+            val callbackClass = Class.forName(
+                "net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents\$ServerStarted"
+            )
             val eventInterface = Class.forName("net.fabricmc.fabric.api.event.Event")
             val register = eventInterface.getMethod("register", Any::class.java)
             val proxy = java.lang.reflect.Proxy.newProxyInstance(
-                lifecycleClass.classLoader,
-                arrayOf(lifecycleClass)
+                callbackClass.classLoader,
+                arrayOf(callbackClass)
             ) { _, _, args ->
                 serverData.bindServer(args[0])
                 null
