@@ -6,13 +6,13 @@ import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import net.fabricmc.api.DedicatedServerModInitializer
-import com.panomc.plugins.pano.fabric.FabricTextUtil
 import java.io.File
 import java.net.URLClassLoader
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.logging.Level
 import java.util.logging.Logger
 
 class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
@@ -23,8 +23,28 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     private val scheduledTasks = ConcurrentHashMap<() -> Unit, ScheduledFuture<*>>()
 
     override fun onInitializeServer() {
+        bindServerLifecycle()
         pano = Pano.init(this)
         pano.onServerStart()
+    }
+
+    private fun bindServerLifecycle() {
+        try {
+            val lifecycleClass = Class.forName("net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents")
+            val startedField = lifecycleClass.getField("SERVER_STARTED")
+            val eventInterface = Class.forName("net.fabricmc.fabric.api.event.Event")
+            val register = eventInterface.getMethod("register", Any::class.java)
+            val proxy = java.lang.reflect.Proxy.newProxyInstance(
+                lifecycleClass.classLoader,
+                arrayOf(lifecycleClass)
+            ) { _, _, args ->
+                serverData.bindServer(args[0])
+                null
+            }
+            register.invoke(startedField.get(null), proxy)
+        } catch (e: Exception) {
+            logger.log(Level.SEVERE, "Failed to hook server lifecycle", e)
+        }
     }
 
     override fun getDataFolder(): File = File("config/pano")
@@ -43,7 +63,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
                 arrayOf(callbackClass)
             ) { _, _, args ->
                 val dispatcher = args[0] as com.mojang.brigadier.CommandDispatcher<Any>
-                commands.forEach { FabricCommand(it).register(dispatcher) }
+                commands.forEach { FabricCommand(it, this@FabricMain).register(dispatcher) }
                 null
             }
             registerMethod.invoke(eventInstance, proxy)
@@ -85,7 +105,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     override fun translateColor(text: String): String = FabricTextUtil.translateColorCodes(text)
 
     override fun registerEventListeners(listeners: List<Listener>) {
-        FabricEventListener(listeners).register()
+        FabricEventListener(this, listeners).register()
     }
 
     override fun unregisterEventListeners(listeners: List<Listener>) {
