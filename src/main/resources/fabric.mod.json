@@ -15,7 +15,7 @@
   "icon": "assets/pano/icon.png",
   "environment": "server",
   "entrypoints": {
-    "main": [
+    "server": [
       "com.panomc.plugins.pano.fabric.FabricMain"
     ]
   },
