@@ -12,11 +12,11 @@
     "sources": "https://github.com/PanoMC/pano-mc-plugin"
   },
   "license": "MIT",
-  "icon": "assets/modid/icon.png",
+  "icon": "assets/pano/icon.png",
   "environment": "server",
   "entrypoints": {
     "main": [
-      "com.example.ExampleMod"
+      "com.panomc.plugins.pano.fabric.FabricMain"
     ]
   },
   "depends": {
