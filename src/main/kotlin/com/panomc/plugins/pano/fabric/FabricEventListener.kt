@@ -3,12 +3,10 @@ package com.panomc.plugins.pano.fabric
 import com.panomc.plugins.pano.core.event.EventType
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.EventHelper
-import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import java.lang.reflect.Proxy
 import java.util.UUID
 
 class FabricEventListener(
-    private val pluginMain: PanoPluginMain,
     private val listeners: List<Listener>
 ) : EventHelper {
 
@@ -48,10 +46,8 @@ class FabricEventListener(
 
     override fun sendMessage(commandSender: Any, message: String) {
         try {
-            val textClass = Class.forName("net.minecraft.text.Text")
-            val literal = textClass.getMethod("literal", String::class.java)
-            val sendMessage = commandSender.javaClass.getMethod("sendMessage", textClass)
-            val text = literal.invoke(null, pluginMain.translateColor(message))
+            val sendMessage = commandSender.javaClass.getMethod("sendMessage", FabricTextUtil.TEXT_CLASS)
+            val text = FabricTextUtil.toText(message)
             sendMessage.invoke(commandSender, text)
         } catch (_: Exception) {
             // ignore

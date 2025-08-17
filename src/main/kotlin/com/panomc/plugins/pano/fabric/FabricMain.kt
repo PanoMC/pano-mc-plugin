@@ -6,6 +6,7 @@ import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import net.fabricmc.api.DedicatedServerModInitializer
+import com.panomc.plugins.pano.fabric.FabricTextUtil
 import java.io.File
 import java.net.URLClassLoader
 import java.util.concurrent.ConcurrentHashMap
@@ -42,7 +43,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
                 arrayOf(callbackClass)
             ) { _, _, args ->
                 val dispatcher = args[0] as com.mojang.brigadier.CommandDispatcher<Any>
-                commands.forEach { FabricCommand(it, this).register(dispatcher) }
+                commands.forEach { FabricCommand(it).register(dispatcher) }
                 null
             }
             registerMethod.invoke(eventInstance, proxy)
@@ -81,10 +82,10 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         }
     }
 
-    override fun translateColor(text: String): String = text.replace("&", "§")
+    override fun translateColor(text: String): String = FabricTextUtil.translateColorCodes(text)
 
     override fun registerEventListeners(listeners: List<Listener>) {
-        FabricEventListener(this, listeners).register()
+        FabricEventListener(listeners).register()
     }
 
     override fun unregisterEventListeners(listeners: List<Listener>) {
