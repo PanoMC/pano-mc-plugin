@@ -1,0 +1,21 @@
+name: Pano
+main: com.panomc.plugins.pano.nukkit.NukkitMain
+version: ${version}
+author: Pano MC
+description: An advanced web platform for Minecraft servers.
+website: http://panomc.com
+api: ["1.0.0"]
+commands:
+  pano:
+    description: Runs Pano commands.
+    permission: pano.admin
+    permission-message: You do not have permission!
+permissions:
+  pano.admin:
+    description: Allows Pano command.
+    default: op
+  pano.*:
+    description: Allows everything in Pano.
+    default: op
+    children:
+      pano.admin: true

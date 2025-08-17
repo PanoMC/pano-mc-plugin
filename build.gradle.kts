@@ -27,6 +27,7 @@ repositories {
         name = "papermc"
         url = uri("https://repo.papermc.io/repository/maven-public/")
     }
+    maven("https://repo.nukkitx.com/main")
 }
 
 dependencies {
@@ -43,6 +44,9 @@ dependencies {
     // velocity
     compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
     annotationProcessor("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
+
+    // nukkit
+    compileOnly("com.github.NukkitX:Nukkit:master-SNAPSHOT")
 
     implementation("io.vertx:vertx-core:$vertxVersion")
     implementation("io.vertx:vertx-web-client:$vertxVersion")
@@ -73,6 +77,10 @@ tasks.processResources {
     filesMatching("velocity-plugin.json") {
         expand(mapOf("version" to version))
     }
+
+    filesMatching("nukkit.yml") {
+        expand(mapOf("version" to version))
+    }
 }
 
 tasks {
@@ -96,6 +104,11 @@ tasks {
             copy {
                 from(shadowJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Folia/plugins")
+            }
+
+            copy {
+                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                into("../minecraft test servers/Nukkit/plugins")
             }
         }
     }
