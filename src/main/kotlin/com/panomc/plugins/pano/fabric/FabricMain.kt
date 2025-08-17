@@ -54,7 +54,15 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
 
     override fun getServerData(): ServerData = serverData
 
-    override fun getPluginClassLoader(): URLClassLoader = FabricMain::class.java.classLoader as URLClassLoader
+    override fun getPluginClassLoader(): URLClassLoader {
+        val cl = FabricMain::class.java.classLoader
+        return if (cl is URLClassLoader) {
+            cl
+        } else {
+            val url = FabricMain::class.java.protectionDomain.codeSource.location
+            URLClassLoader(arrayOf(url), cl)
+        }
+    }
 
     override fun translateColor(text: String): String = text.replace("&", "§")
 
