@@ -6,5 +6,6 @@ enum class ServerType {
     PAPER,
     SPIGOT,
     BUKKIT,
-    VELOCITY
+    VELOCITY,
+    FORGE
 }

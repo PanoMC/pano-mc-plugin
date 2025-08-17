@@ -73,6 +73,10 @@ tasks.processResources {
     filesMatching("velocity-plugin.json") {
         expand(mapOf("version" to version))
     }
+
+    filesMatching("META-INF/mods.toml") {
+        expand(mapOf("version" to version))
+    }
 }
 
 tasks {
@@ -96,6 +100,11 @@ tasks {
             copy {
                 from(shadowJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Folia/plugins")
+            }
+
+            copy {
+                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                into("../minecraft test servers/Forge/mods")
             }
         }
     }
