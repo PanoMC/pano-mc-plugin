@@ -15,6 +15,8 @@ class FabricEventListener(
     fun register() {
         try {
             val eventsClass = Class.forName("net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents")
+            val eventInterface = Class.forName("net.fabricmc.fabric.api.event.Event")
+            val register = eventInterface.getMethod("register", Any::class.java)
 
             val joinField = eventsClass.getField("JOIN")
             val joinEvent = joinField.get(null)
@@ -26,8 +28,7 @@ class FabricEventListener(
                     .forEach { it.handle(this, player) }
                 null
             }
-            val joinRegister = joinEvent.javaClass.getMethod("register", Any::class.java)
-            joinRegister.invoke(joinEvent, joinProxy)
+            register.invoke(joinEvent, joinProxy)
 
             val disconnectField = eventsClass.getField("DISCONNECT")
             val disconnectEvent = disconnectField.get(null)
@@ -39,8 +40,7 @@ class FabricEventListener(
                     .forEach { it.handle(this, player) }
                 null
             }
-            val disconnectRegister = disconnectEvent.javaClass.getMethod("register", Any::class.java)
-            disconnectRegister.invoke(disconnectEvent, disconnectProxy)
+            register.invoke(disconnectEvent, disconnectProxy)
         } catch (_: Exception) {
             // ignore if Fabric classes are unavailable
         }

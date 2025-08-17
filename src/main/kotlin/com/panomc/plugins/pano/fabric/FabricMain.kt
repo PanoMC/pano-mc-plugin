@@ -35,7 +35,8 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
             val callbackClass = Class.forName("net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback")
             val eventField = callbackClass.getField("EVENT")
             val eventInstance = eventField.get(null)
-            val registerMethod = eventInstance.javaClass.getMethod("register", Any::class.java)
+            val eventInterface = Class.forName("net.fabricmc.fabric.api.event.Event")
+            val registerMethod = eventInterface.getMethod("register", Any::class.java)
             val proxy = java.lang.reflect.Proxy.newProxyInstance(
                 callbackClass.classLoader,
                 arrayOf(callbackClass)
