@@ -74,10 +74,15 @@ class FabricServerData : ServerData {
         val srv = server ?: return 0
         return runCatching {
             val playerManager = srv.javaClass.getMethod("getPlayerManager").invoke(srv)
-            playerManager.javaClass.methods.firstOrNull { m ->
+            val method = playerManager.javaClass.methods.firstOrNull { m ->
                 m.parameterCount == 0 && m.returnType == Int::class.javaPrimitiveType &&
-                    m.name.contains("getMaxPlayerCount")
-            }?.invoke(playerManager) as? Int ?: 0
+                    (m.name.contains("getMaxPlayerCount") ||
+                        m.name.contains("getMaxPlayers") ||
+                        m.name.contains("getMaxPlayer"))
+            }
+            (method?.invoke(playerManager) as? Int)
+                ?: loadProperties().getProperty("max-players")?.toIntOrNull()
+                ?: 0
         }.getOrDefault(0)
     }
 }

@@ -7,10 +7,9 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder.argument
 import com.mojang.brigadier.context.CommandContext
 import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.helper.CommandHelper
-import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import kotlinx.coroutines.runBlocking
 
-class FabricCommand(private val command: Command, private val pluginMain: PanoPluginMain) : CommandHelper {
+class FabricCommand(private val command: Command) : CommandHelper {
     fun register(dispatcher: CommandDispatcher<Any>) {
         dispatcher.register(
             literal<Any>(command.name)
@@ -41,8 +40,7 @@ class FabricCommand(private val command: Command, private val pluginMain: PanoPl
                     java.util.function.Supplier::class.java.isAssignableFrom(it.parameterTypes[0])
             } ?: throw NoSuchMethodException("sendFeedback")
 
-            val colored = pluginMain.translateColor(message)
-            val textObj = FabricTextUtil.toText(colored)
+            val textObj = FabricTextUtil.toText(message)
             val supplier = java.util.function.Supplier { textObj }
             feedback.isAccessible = true
             feedback.invoke(source, supplier, false)
