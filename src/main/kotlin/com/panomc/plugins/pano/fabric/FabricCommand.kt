@@ -29,8 +29,16 @@ class FabricCommand(private val command: Command, private val pluginMain: PanoPl
 
     override fun sendMessage(commandSender: Any, message: String) {
         try {
-            val textClass = Class.forName("net.minecraft.text.Text")
-            val literal = textClass.getMethod("literal", String::class.java)
+            val resolver = net.fabricmc.loader.api.FabricLoader.getInstance().mappingResolver
+            val textClassName = resolver.mapClassName("named", "net.minecraft.text.Text")
+            val literalName = resolver.mapMethodName(
+                "named",
+                "net.minecraft.text.Text",
+                "literal",
+                "(Ljava/lang/String;)Lnet/minecraft/text/MutableText;"
+            )
+            val textClass = Class.forName(textClassName)
+            val literal = textClass.getMethod(literalName, String::class.java)
 
             val source = try {
                 commandSender.javaClass.getMethod("getSource").invoke(commandSender)
