@@ -35,7 +35,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
             val callbackClass = Class.forName("net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback")
             val eventField = callbackClass.getField("EVENT")
             val eventInstance = eventField.get(null)
-            val registerMethod = eventInstance.javaClass.getMethod("register", callbackClass)
+            val registerMethod = eventInstance.javaClass.getMethod("register", Any::class.java)
             val proxy = java.lang.reflect.Proxy.newProxyInstance(
                 callbackClass.classLoader,
                 arrayOf(callbackClass)
@@ -45,8 +45,8 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
                 null
             }
             registerMethod.invoke(eventInstance, proxy)
-        } catch (e: Exception) {
-            logger.severe("Failed to register commands: ${e.message}")
+        } catch (e: Throwable) {
+            logger.log(java.util.logging.Level.SEVERE, "Failed to register commands", e)
         }
     }
 
