@@ -29,31 +29,32 @@ class FabricCommand(private val command: Command, private val pluginMain: PanoPl
 
     override fun sendMessage(commandSender: Any, message: String) {
         try {
-            val resolver = net.fabricmc.loader.api.FabricLoader.getInstance().mappingResolver
-            val textClassName = resolver.mapClassName("named", "net.minecraft.text.Text")
-            val literalName = resolver.mapMethodName(
-                "named",
-                "net.minecraft.text.Text",
-                "literal",
-                "(Ljava/lang/String;)Lnet/minecraft/text/MutableText;"
-            )
-            val textClass = Class.forName(textClassName)
-            val literal = textClass.getMethod(literalName, String::class.java)
-
             val source = try {
                 commandSender.javaClass.getMethod("getSource").invoke(commandSender)
             } catch (_: NoSuchMethodException) {
                 commandSender
             }
-            val feedback = source.javaClass.getMethod(
-                "sendFeedback",
-                java.util.function.Supplier::class.java,
-                Boolean::class.javaPrimitiveType
-            )
 
-            val supplier = java.util.function.Supplier {
-                literal.invoke(null, pluginMain.translateColor(message))
-            }
+            val feedback = source.javaClass.methods.firstOrNull {
+                it.parameterCount == 2 &&
+                    it.parameterTypes[1] == Boolean::class.javaPrimitiveType &&
+                    java.util.function.Supplier::class.java.isAssignableFrom(it.parameterTypes[0])
+            } ?: throw NoSuchMethodException("sendFeedback")
+
+            val textClass = ((feedback.genericParameterTypes[0] as? java.lang.reflect.ParameterizedType)
+                ?.actualTypeArguments?.firstOrNull() as? Class<*>)
+                ?: throw ClassNotFoundException("Text class")
+
+            val literal = textClass.methods.firstOrNull { m ->
+                java.lang.reflect.Modifier.isStatic(m.modifiers) &&
+                    m.parameterCount == 1 &&
+                    m.parameterTypes[0] == String::class.java &&
+                    textClass.isAssignableFrom(m.returnType)
+            } ?: throw NoSuchMethodException("literal")
+
+            val textObj = literal.invoke(null, pluginMain.translateColor(message))
+            val supplier = java.util.function.Supplier { textObj }
+            feedback.isAccessible = true
             feedback.invoke(source, supplier, false)
         } catch (e: Exception) {
             e.printStackTrace()
