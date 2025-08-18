@@ -51,7 +51,7 @@ class ConfigManager(vertx: Vertx, private val logger: Logger, dataFolder: File) 
         val parsedConfig = ConfigFactory.parseMap(config.map)
 
         if (!configFile.parentFile.exists()) {
-            configFile.parentFile.mkdir()
+            configFile.parentFile.mkdirs()
         }
 
         configFile.writeText(parsedConfig.root().render(renderOptions))
