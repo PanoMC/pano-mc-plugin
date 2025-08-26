@@ -1,0 +1,8 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="MIT"
+[[mods]]
+modId="pano"
+version="${version}"
+displayName="Pano"
+description="Pano cross-platform plugin"
