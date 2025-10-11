@@ -4,6 +4,7 @@ import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
+import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.util.ImageUtil
 import io.vertx.core.Vertx
 import io.vertx.core.buffer.Buffer
@@ -146,9 +147,9 @@ class PlatformManager(
         try {
             response = request.coAwait()
         } catch (exception: Exception) {
-            logger.severe(exception.message)
+            exception.printStackTrace()
 
-            throw Exception("&cCouldn't connect to Pano Platform. Check your information. Checkout console for more detail.")
+            throw PanoError("&cCouldn't connect to Pano Platform. Check your information. Checkout console for more detail.")
         }
 
         val body = response.bodyAsJsonObject()
@@ -156,7 +157,7 @@ class PlatformManager(
         if (body != null && body.getString("result") == "error") {
             val error = body.getString("error")
 
-            throw Exception(getErrorMessageByErrorCode(error))
+            throw PanoError(getErrorMessageByErrorCode(error))
         }
 
         val token = body.getString("token")

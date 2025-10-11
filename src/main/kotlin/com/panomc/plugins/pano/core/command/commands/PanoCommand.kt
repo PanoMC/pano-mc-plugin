@@ -3,6 +3,7 @@ package com.panomc.plugins.pano.core.command.commands
 import com.panomc.plugins.pano.core.PlatformManager
 import com.panomc.plugins.pano.core.annotation.Command
 import com.panomc.plugins.pano.core.helper.CommandHelper
+import com.panomc.plugins.pano.core.model.PanoError
 import java.io.Console
 
 @Command
@@ -62,6 +63,10 @@ class PanoCommand(
 
         try {
             platformManager.connectNewPlatform(platformAddress, platformCode)
+        } catch (panoError: PanoError) {
+            commandHelper.sendMessage(commandSender, panoError.message!!)
+
+            return true
         } catch (exception: Exception) {
             exception.printStackTrace()
 
