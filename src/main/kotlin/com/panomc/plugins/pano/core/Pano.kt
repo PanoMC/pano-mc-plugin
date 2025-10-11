@@ -6,6 +6,7 @@ import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.event.EventManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.schedule.ScheduleManager
+import com.panomc.plugins.pano.core.util.LoggerUtil
 import io.vertx.core.Vertx
 import io.vertx.core.VertxOptions
 import io.vertx.kotlin.coroutines.CoroutineVerticle
@@ -15,7 +16,6 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import java.net.URLClassLoader
 import java.util.jar.Manifest
 import kotlin.properties.Delegates
-
 
 @Boot
 class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
@@ -135,6 +135,11 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
     }
 
     private suspend fun init() {
+        logger.info("Initializing logger settings")
+
+        LoggerUtil.setLoggerLevel("io.vertx.core.http.impl.HttpClientConnectionInternal", "ERROR")
+
+
         initDependencyInjection()
 
         initConfigManager()
