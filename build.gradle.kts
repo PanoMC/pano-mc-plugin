@@ -53,6 +53,7 @@ dependencies {
     implementation("io.vertx:vertx-json-schema:$vertxVersion")
 
     implementation("com.fasterxml.jackson.core:jackson-core:2.19.2")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.19.2")
 
     implementation("org.springframework:spring-context:5.3.39")
 }
