@@ -38,7 +38,7 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:1.17-R0.1-SNAPSHOT")
 
     // bungeecord
-    compileOnly("net.md-5:bungeecord-api:1.19-R0.1-SNAPSHOT")
+    compileOnly("net.md-5:bungeecord-api:1.21-R0.4")
 
     // velocity
     compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
@@ -96,6 +96,11 @@ tasks {
             copy {
                 from(shadowJar.get().archiveFile.get().asFile.absolutePath)
                 into("../minecraft test servers/Folia/plugins")
+            }
+
+            copy {
+                from(shadowJar.get().archiveFile.get().asFile.absolutePath)
+                into("../minecraft test servers/Paper/plugins")
             }
         }
     }
