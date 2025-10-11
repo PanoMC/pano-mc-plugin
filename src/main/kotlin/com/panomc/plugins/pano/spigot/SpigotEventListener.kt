@@ -35,7 +35,6 @@ class SpigotEventListener(
             .filter { it.eventType == EventType.ON_PLAYER_JOIN }
             .forEach { listener ->
                 listener.handle(this, event.player)
-                event.player.uniqueId
             }
     }
 
