@@ -6,6 +6,7 @@ import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.core.util.LegacyColorConverter
 import com.velocitypowered.api.command.CommandMeta
 import com.velocitypowered.api.event.Subscribe
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent
@@ -130,7 +131,7 @@ class VelocityMain : PanoPluginMain {
 
     override fun getPluginClassLoader(): URLClassLoader = VelocityMain::class.java.classLoader as URLClassLoader
 
-    override fun translateColor(text: String): String = text.replace("&", "§")
+    override fun translateColor(text: String): String = LegacyColorConverter.translate(text)
 
     override fun registerEventListeners(listeners: List<Listener>) {
         server.eventManager.register(this, VelocityEventListener(this, listeners))
