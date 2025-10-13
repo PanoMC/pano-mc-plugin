@@ -2,6 +2,7 @@ package com.panomc.plugins.pano.core.event.listeners
 
 import com.panomc.plugins.pano.core.PlatformManager
 import com.panomc.plugins.pano.core.ServerEvent
+import com.panomc.plugins.pano.core.ServerType
 import com.panomc.plugins.pano.core.event.EventType
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.EventHelper
@@ -17,8 +18,21 @@ class OnPlayerDisconnect(private val platformManager: PlatformManager, private v
 
         val eventRequest = platformManager.createEventRequest(ServerEvent.ON_PLAYER_DISCONNECT)
 
+        var playerCount = pluginMain.getServerData().playerCount()
+
+        if (pluginMain.getServerData().serverType() in listOf(
+                ServerType.FOLIA,
+                ServerType.PAPER,
+                ServerType.SPIGOT,
+                ServerType.BUKKIT,
+                ServerType.BUNGEECORD,
+            )
+        ) {
+            playerCount -= 1
+        }
+
         eventRequest.put("player", playerData)
-        eventRequest.put("playerCount", pluginMain.getServerData().playerCount())
+        eventRequest.put("playerCount", playerCount)
 
         platformManager.getWebSocket()?.writeTextMessage(eventRequest.encode())
     }
