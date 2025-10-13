@@ -124,7 +124,7 @@ class PanoCommand(
     }
 
     private fun showHelp(commandSender: Any, commandHelper: CommandHelper) {
-        commandHelper.sendMessage(commandSender, "&6Pano Web Platform Plugin Commands:")
+        commandHelper.sendMessage(commandSender, "&6Pano MC Plugin Commands:")
         commandHelper.sendMessage(
             commandSender,
             "&e/pano connect <platform-address> <platform-code> - Connect to Pano platform."
