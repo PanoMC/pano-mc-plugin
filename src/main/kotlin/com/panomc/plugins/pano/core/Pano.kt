@@ -85,8 +85,10 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
     private lateinit var scheduleManager: ScheduleManager
     private lateinit var platformManager: PlatformManager
     private val logger = panoPluginMain.getLogger()
+    private var stopping = false
 
     override suspend fun start() {
+        stopping = false
         logger.info(
             panoPluginMain.translateColor(
                 "&9\n" +
@@ -115,10 +117,6 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
 
         platformManager.stop()
 
-        vertx.close().coAwait()
-
-        super.stop()
-
         logger.info("Pano is disabled")
     }
 
@@ -129,8 +127,14 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
     }
 
     internal fun disable() {
+        if (stopping) {
+            return
+        }
+
+        stopping = true
+
         runBlocking {
-            stop()
+            vertx.close().coAwait()
         }
     }
 

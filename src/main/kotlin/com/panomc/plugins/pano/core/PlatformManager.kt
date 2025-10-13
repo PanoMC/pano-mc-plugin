@@ -17,7 +17,6 @@ import io.vertx.kotlin.coroutines.dispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.awt.image.BufferedImage
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
@@ -76,15 +75,19 @@ class PlatformManager(
         connectPlatformTask.invoke(false)
     }
 
-    fun stop() {
+    suspend fun stop() {
         canConnect = false
 
         if (!isPlatformConfigured()) {
             return
         }
 
-        runBlocking {
-            closeConnection()
+        val isWebsocketNull = webSocket == null
+
+        closeConnection()
+
+        if (!isWebsocketNull) {
+            printLostConnectionToPlatform()
         }
     }
 
@@ -286,12 +289,16 @@ class PlatformManager(
         logger.info(pluginMain.translateColor("Sent server info update to the platform."))
     }
 
+    private fun printLostConnectionToPlatform() {
+        logger.info(pluginMain.translateColor("&6Lost connection to platform."))
+    }
+
     private fun onWebSocketClosed() {
         webSocket = null
 
-        logger.info(pluginMain.translateColor("&6Disconnected from the platform."))
-
         if (canConnect) {
+            printLostConnectionToPlatform()
+
             logger.info(pluginMain.translateColor("&eRetrying to connect..."))
 
             connectPlatformTask.invoke(true)
