@@ -18,7 +18,19 @@
       {
         "assets": [
           {
-            "path": "build/libs/*.jar",
+            "path": "Core/build/libs/*.jar",
+            "label": false
+          },
+          {
+            "path": "Bungeecord/build/libs/*.jar",
+            "label": false
+          },
+          {
+            "path": "Spigot/build/libs/*.jar",
+            "label": false
+          },
+          {
+            "path": "Velocity/build/libs/*.jar",
             "label": false
           },
           {
