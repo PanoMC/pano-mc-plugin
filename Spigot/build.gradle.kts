@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.panomc.plugins.pano"
-version = "local-build"
+version = rootProject.version
 
 dependencies {
     testImplementation(kotlin("test"))

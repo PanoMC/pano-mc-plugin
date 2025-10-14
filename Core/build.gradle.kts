@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.panomc.plugins.pano"
-version = "local-build"
+version = rootProject.version
 
 repositories {
     maven("https://oss.sonatype.org/content/repositories/iovertx-3720/")
