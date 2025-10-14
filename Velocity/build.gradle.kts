@@ -41,6 +41,10 @@ tasks {
         dependsOn(shadowJar)
     }
 
+    register("buildDev") {
+        dependsOn(build)
+    }
+
     register("buildPluginDev") {
         dependsOn(build)
         doLast {

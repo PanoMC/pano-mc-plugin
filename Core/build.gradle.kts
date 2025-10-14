@@ -1,8 +1,9 @@
 val vertxVersion: String by rootProject
+val buildType: String by rootProject.extra
 
 plugins {
-    kotlin("jvm") version "2.2.0"
-    kotlin("kapt") version "2.2.0"
+    kotlin("jvm")
+    id("com.gradleup.shadow")
 }
 
 group = "com.panomc.plugins.pano"
@@ -37,4 +38,37 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks {
+    build {
+        dependsOn(shadowJar)
+    }
+
+    register("buildDev") {
+        dependsOn(build)
+    }
+
+    shadowJar {
+        manifest {
+            val attrMap = mutableMapOf<String, String>()
+
+            if (project.gradle.startParameter.taskNames.contains("buildDev"))
+                attrMap["MODE"] = "DEVELOPMENT"
+
+            attrMap["VERSION"] = version.toString()
+            attrMap["BUILD_TYPE"] = buildType
+
+            attributes(attrMap)
+        }
+        mergeServiceFiles()
+        relocate("com.fasterxml.jackson", "com.panomc.shadow.jackson")
+        relocate("io.netty", "vertx.io.netty")
+
+        archiveFileName.set("${rootProject.name}-${version}.jar")
+
+        if (project.gradle.startParameter.taskNames.contains("publish")) {
+            archiveFileName.set(archiveFileName.get().lowercase())
+        }
+    }
 }

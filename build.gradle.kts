@@ -28,7 +28,7 @@ tasks.withType<Jar> {
 
 tasks {
     register("buildDev") {
-        dependsOn(subprojects.filter { it.name != "Core" }.map { "${it.path}:buildDev" })
+        dependsOn(subprojects.map { "${it.path}:buildDev" })
     }
 
     // This task builds and copys jar into server folders for test
