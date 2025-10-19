@@ -1,13 +1,13 @@
-package com.panomc.platform.config
+package com.panomc.plugins.pano.core.config
 
-import com.panomc.plugins.pano.core.config.ConfigManager
+import io.vertx.core.json.JsonObject
 
-abstract class ConfigMigration {
-    abstract val FROM_VERSION: Int
-    abstract val VERSION: Int
-    abstract val VERSION_INFO: String
+abstract class ConfigMigration(
+    val from: Int,
+    val to: Int,
+    val versionInfo: String
+) {
+    fun isMigratable(version: Int) = version == from
 
-    fun isMigratable(version: Int) = version == FROM_VERSION
-
-    abstract fun migrate(configManager: ConfigManager)
+    abstract fun migrate(config: JsonObject)
 }

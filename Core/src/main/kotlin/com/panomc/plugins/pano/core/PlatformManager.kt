@@ -1,6 +1,7 @@
 package com.panomc.plugins.pano.core
 
 import com.panomc.plugins.pano.core.config.ConfigManager
+import com.panomc.plugins.pano.core.config.PanoConfig
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
@@ -53,9 +54,9 @@ class PlatformManager(
     }
 
     fun isPlatformConfigured(): Boolean {
-        val platformConfig = configManager.getConfig().getJsonObject("platform") ?: return false
+        val platformConfig = configManager.config.platform ?: return false
 
-        return !platformConfig.getString("token").isNullOrEmpty()
+        return !platformConfig.token.isNullOrEmpty()
     }
 
     fun start() {
@@ -173,10 +174,10 @@ class PlatformManager(
         canConnect = false
         closeConnection()
 
-        val platformConfig = configManager.getConfig().getJsonObject("platform")
-        val host = platformConfig.getString("host")
-        val port = platformConfig.getInteger("port")
-        val token = platformConfig.getString("token")
+        val platformConfig = configManager.config.platform!!
+        val host = platformConfig.host
+        val port = platformConfig.port!!
+        val token = platformConfig.token
 
         val request = webClient
             .post(port, host, "/api/server/disconnect")
@@ -195,10 +196,10 @@ class PlatformManager(
     }
 
     private suspend fun establishConnectionToPlatform() {
-        val platformConfig = configManager.getConfig().getJsonObject("platform")
-        val host = platformConfig.getString("host")
-        val port = platformConfig.getInteger("port")
-        val token = platformConfig.getString("token")
+        val platformConfig = configManager.config.platform!!
+        val host = platformConfig.host
+        val port = platformConfig.port
+        val token = platformConfig.token
 
         val webSocketConnectOptions = WebSocketConnectOptions()
 
@@ -313,21 +314,29 @@ class PlatformManager(
     }
 
     private fun savePlatform(host: String, port: Int, token: String) {
-        val platformConfig = configManager.getConfig().getJsonObject("platform")
+        if (configManager.config.platform == null) {
+            configManager.config.platform = PanoConfig.Companion.PlatformConfig()
+        }
 
-        platformConfig.put("host", host)
-        platformConfig.put("port", port)
-        platformConfig.put("token", token)
+        val platformConfig = configManager.config.platform!!
+
+        platformConfig.host = host
+        platformConfig.port = port
+        platformConfig.token = token
 
         configManager.saveConfig()
     }
 
     private fun removePlatform() {
-        val platformConfig = configManager.getConfig().getJsonObject("platform")
+        if (configManager.config.platform == null) {
+            configManager.config.platform = PanoConfig.Companion.PlatformConfig()
+        }
 
-        platformConfig.put("host", "")
-        platformConfig.put("port", 8080)
-        platformConfig.put("token", "")
+        val platformConfig = configManager.config.platform!!
+
+        platformConfig.host =  ""
+        platformConfig.port = 8080
+        platformConfig.token = ""
 
         configManager.saveConfig()
     }

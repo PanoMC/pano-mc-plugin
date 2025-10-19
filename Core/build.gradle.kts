@@ -1,4 +1,5 @@
 val vertxVersion: String by rootProject
+val gsonVersion: String by rootProject
 val buildType: String by rootProject.extra
 
 plugins {
@@ -30,6 +31,9 @@ dependencies {
 
     api("com.fasterxml.jackson.core:jackson-core:2.19.2")
     api("com.fasterxml.jackson.core:jackson-databind:2.19.2")
+
+    // https://mvnrepository.com/artifact/com.google.code.gson/gson
+    api("com.google.code.gson:gson:${gsonVersion}")
 }
 
 kotlin {
