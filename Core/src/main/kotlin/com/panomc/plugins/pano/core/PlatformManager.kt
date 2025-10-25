@@ -276,7 +276,7 @@ class PlatformManager(
             eventRequest
                 .put(
                     "favicon",
-                    if (pingData.faviconImage is BufferedImage) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage) else pingData.faviconImage
+                    ImageUtil.bufferedImageToDataUrl(pingData.faviconImage)
                 )
         }
 
