@@ -288,6 +288,8 @@ class PlatformManager(
         webSocket?.writeTextMessage(eventRequest.encode())
 
         logger.info(pluginMain.translateColor("Sent server info update to the platform."))
+
+        pluginMain.onConnectionEstablished(webSocket)
     }
 
     private fun printLostConnectionToPlatform() {
