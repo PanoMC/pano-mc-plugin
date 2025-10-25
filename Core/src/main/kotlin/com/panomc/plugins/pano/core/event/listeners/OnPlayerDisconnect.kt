@@ -1,10 +1,10 @@
 package com.panomc.plugins.pano.core.event.listeners
 
 import com.panomc.plugins.pano.core.PlatformManager
-import com.panomc.plugins.pano.core.ServerEvent
 import com.panomc.plugins.pano.core.ServerType
 import com.panomc.plugins.pano.core.event.EventType
 import com.panomc.plugins.pano.core.event.Listener
+import com.panomc.plugins.pano.core.event.events.OnPlayerDisconnectRequest
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 
@@ -15,8 +15,6 @@ class OnPlayerDisconnect(private val platformManager: PlatformManager, private v
     override fun handle(eventHelper: EventHelper, vararg args: Any) {
         val player = args[0]
         val playerData = eventHelper.convertToPlayerData(player)
-
-        val eventRequest = platformManager.createEventRequest(ServerEvent.ON_PLAYER_DISCONNECT)
 
         var playerCount = pluginMain.getServerData().playerCount()
 
@@ -31,9 +29,8 @@ class OnPlayerDisconnect(private val platformManager: PlatformManager, private v
             playerCount -= 1
         }
 
-        eventRequest.put("player", playerData)
-        eventRequest.put("playerCount", playerCount)
+        val eventRequest = OnPlayerDisconnectRequest(playerData, playerCount)
 
-        platformManager.getWebSocket()?.writeTextMessage(eventRequest.encode())
+        platformManager.sendRequest(eventRequest)
     }
 }

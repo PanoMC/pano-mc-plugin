@@ -2,6 +2,7 @@ package com.panomc.plugins.pano.core
 
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.config.PanoConfig
+import com.panomc.plugins.pano.core.event.events.OnServerConnectRequest
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
@@ -93,14 +94,6 @@ class PlatformManager(
     }
 
     fun getWebSocket() = webSocket
-
-    fun createEventRequest(serverEvent: ServerEvent): JsonObject {
-        val body = JsonObject()
-
-        body.put("event", serverEvent.name)
-
-        return body
-    }
 
     suspend fun connectNewPlatform(platformAddress: String, platformCode: String) {
         val pingData = minecraftStatusClient.query(host = serverData.hostAddress(), port = serverData.port())
@@ -260,30 +253,18 @@ class PlatformManager(
     private suspend fun onConnectionEstablished() {
         val pingData = minecraftStatusClient.query(host = serverData.hostAddress(), port = serverData.port())
 
-        val eventRequest = createEventRequest(ServerEvent.ON_SERVER_CONNECT)
-
-        eventRequest
-            .put("serverName", serverData.serverName())
-            .put("playerCount", serverData.playerCount())
-            .put("maxPlayerCount", serverData.maxPlayerCount())
-            .put("serverType", serverData.serverType())
-            .put("serverVersion", serverData.serverVersion())
-            .put("host", serverData.hostAddress())
-            .put("port", serverData.port())
-            .put("startTime", Pano.serverStartTime)
-
-        if (pingData.faviconImage != null) {
-            eventRequest
-                .put(
-                    "favicon",
-                    ImageUtil.bufferedImageToDataUrl(pingData.faviconImage)
-                )
-        }
-
-        if (pingData.descriptionJson != null) {
-            eventRequest
-                .put("motd", pingData.descriptionJson)
-        }
+        val eventRequest = OnServerConnectRequest(
+            serverData.serverName(),
+            serverData.playerCount(),
+            serverData.maxPlayerCount(),
+            serverData.serverType(),
+            serverData.serverVersion(),
+            serverData.hostAddress(),
+            serverData.port(),
+            Pano.serverStartTime,
+            if (pingData.faviconImage != null) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage) else null,
+            pingData.descriptionJson
+        )
 
         webSocket?.writeTextMessage(eventRequest.encode())
 
@@ -361,5 +342,9 @@ class PlatformManager(
         }
 
         return "&cError: Failed to connect Pano Platform. Reason: $error"
+    }
+
+    fun sendRequest(serverEventRequest: ServerEventRequest) {
+        webSocket?.writeTextMessage(serverEventRequest.encode())
     }
 }
