@@ -28,6 +28,6 @@ class OnPlayerDisconnect(private val platformManager: PlatformManager, private v
 
         val eventRequest = OnPlayerDisconnectRequest(playerData, playerCount)
 
-        platformManager.sendRequest(eventRequest)
+        platformManager.sendMessage(eventRequest)
     }
 }

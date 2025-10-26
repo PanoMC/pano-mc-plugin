@@ -13,6 +13,6 @@ class OnPlayerJoin(private val platformManager: PlatformManager, private val plu
 
         val eventRequest = OnPlayerJoinRequest(playerData, pluginMain.getServerData().playerCount())
 
-        platformManager.sendRequest(eventRequest)
+        platformManager.sendMessage(eventRequest)
     }
 }

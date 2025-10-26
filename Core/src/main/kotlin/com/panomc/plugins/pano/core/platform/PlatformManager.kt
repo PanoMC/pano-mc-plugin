@@ -10,6 +10,8 @@ import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
 import com.panomc.plugins.pano.core.platform.message.response.PongMessage
 import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
+import com.panomc.plugins.pano.core.util.Aes256GcmUtil
+import com.panomc.plugins.pano.core.util.EncryptUtil
 import com.panomc.plugins.pano.core.util.ImageUtil
 import io.vertx.core.Vertx
 import io.vertx.core.http.*
@@ -22,9 +24,12 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.security.KeyFactory
+import java.security.spec.PKCS8EncodedKeySpec
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
+import javax.crypto.SecretKey
 
 class PlatformManager(
     private val vertx: Vertx,
@@ -39,6 +44,11 @@ class PlatformManager(
     private var webSocket: WebSocket? = null
     private var canConnect = true // to be able to cancel connection task
     private val pendingResponses = mutableMapOf<UUID, CompletableDeferred<PlatformMessage>>()
+
+    private var encryptionKey: SecretKey? = null
+    private val decoder by lazy {
+        Base64.getDecoder()
+    }
 
     internal val messageResponseDefinitions = mutableSetOf<Class<out PlatformMessageResponse>>(
         PongMessage::class.java
@@ -67,7 +77,7 @@ class PlatformManager(
     fun isPlatformConfigured(): Boolean {
         val platformConfig = configManager.config.platform ?: return false
 
-        return !platformConfig.token.isNullOrEmpty()
+        return platformConfig.token.isNotBlank() && platformConfig.encryptionKey.isNotBlank()
     }
 
     fun start() {
@@ -131,6 +141,7 @@ class PlatformManager(
             .put("host", serverData.hostAddress())
             .put("port", serverData.port())
             .put("startTime", Pano.serverStartTime)
+            .put("publicKey", configManager.config.publicKey)
 
         if (pingData.faviconImage != null) {
             requestBody
@@ -167,9 +178,15 @@ class PlatformManager(
             throw PanoError(getErrorMessageByErrorCode(error))
         }
 
-        val token = body.getString("token")
+        val keySpec = PKCS8EncodedKeySpec(decoder.decode(configManager.config.privateKey))
+        val keyFactory = KeyFactory.getInstance("RSA")
+        val privateKey = keyFactory.generatePrivate(keySpec)
 
-        savePlatform(host, port, token)
+        val token = body.getString("token")
+        val decodedEncryptionKey = Base64.getDecoder().decode(body.getString("encryptionKey"))
+        val encryptionKey = EncryptUtil.decryptData(decodedEncryptionKey, privateKey)
+
+        savePlatform(host, port, token, encryptionKey)
         canConnect = true
     }
 
@@ -179,7 +196,7 @@ class PlatformManager(
 
         val platformConfig = configManager.config.platform!!
         val host = platformConfig.host
-        val port = platformConfig.port!!
+        val port = platformConfig.port
         val token = platformConfig.token
 
         val request = webClient
@@ -278,14 +295,16 @@ class PlatformManager(
             pingData.descriptionJson
         )
 
-        webSocket?.writeTextMessage(eventRequest.encode())
+        sendMessage(eventRequest)
 
         logger.info(pluginMain.translateColor("Sent server info update to the platform."))
 
         pluginMain.onConnectionEstablished(webSocket)
     }
 
-    private suspend fun onWebsocketTextMessage(msg: String) {
+    private suspend fun onWebsocketTextMessage(encryptedMessage: String) {
+        validateEncryptionKey()
+        val msg = Aes256GcmUtil.decrypt(encryptedMessage, encryptionKey!!)
         val json = JsonObject(msg)
         val event = json.getString("event")
         json.remove("event")
@@ -335,7 +354,7 @@ class PlatformManager(
         webSocket?.close()?.coAwait()
     }
 
-    private fun savePlatform(host: String, port: Int, token: String) {
+    private fun savePlatform(host: String, port: Int, token: String, encryptionKey: String) {
         if (configManager.config.platform == null) {
             configManager.config.platform = PanoConfig.Companion.PlatformConfig()
         }
@@ -345,6 +364,7 @@ class PlatformManager(
         platformConfig.host = host
         platformConfig.port = port
         platformConfig.token = token
+        platformConfig.encryptionKey = encryptionKey
 
         configManager.saveConfig()
     }
@@ -359,6 +379,9 @@ class PlatformManager(
         platformConfig.host = ""
         platformConfig.port = 8080
         platformConfig.token = ""
+        platformConfig.encryptionKey = ""
+
+        encryptionKey = null
 
         configManager.saveConfig()
     }
@@ -383,16 +406,34 @@ class PlatformManager(
         return "&cError: Failed to connect Pano Platform. Reason: $error"
     }
 
-    fun sendRequest(platformRequest: PlatformRequest) {
-        webSocket?.writeTextMessage(platformRequest.encode())
+    private fun validateEncryptionKey() {
+        if (encryptionKey == null) {
+            val encodedKey = configManager.config.platform!!.encryptionKey
+            encryptionKey = Aes256GcmUtil.base64ToSecretKey(encodedKey)
+        }
     }
 
-    suspend fun <T : PlatformMessage> sendRequestAwaitResponse(
+    fun sendMessage(platformRequest: PlatformRequest) {
+        validateEncryptionKey()
+
+        val message = platformRequest.encode()
+        val encryptedMessage = Aes256GcmUtil.encrypt(message, encryptionKey!!)
+
+        webSocket?.writeTextMessage(encryptedMessage)
+    }
+
+    suspend fun <T : PlatformMessage> sendMessageAwaitResponse(
         platformRequest: PlatformRequest
     ): T {
+        validateEncryptionKey()
+
         val deferred = CompletableDeferred<T>()
         pendingResponses[platformRequest.eventId] = deferred as CompletableDeferred<PlatformMessage>
-        webSocket?.writeTextMessage(platformRequest.encode())
+
+        val message = platformRequest.encode()
+        val encryptedMessage = Aes256GcmUtil.encrypt(message, encryptionKey!!)
+
+        webSocket?.writeTextMessage(encryptedMessage)
         return deferred.await()
     }
 }
