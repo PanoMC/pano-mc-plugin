@@ -1,8 +1,8 @@
 package com.panomc.plugins.pano.core.command
 
-import com.panomc.plugins.pano.core.PlatformManager
 import com.panomc.plugins.pano.core.command.commands.PanoCommand
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
+import com.panomc.plugins.pano.core.platform.PlatformManager
 import java.util.logging.Logger
 
 class CommandManager(

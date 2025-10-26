@@ -1,25 +1,28 @@
-package com.panomc.plugins.pano.core
+package com.panomc.plugins.pano.core.platform
 
+import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.config.PanoConfig
-import com.panomc.plugins.pano.core.event.events.OnServerConnectRequest
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
+import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
+import com.panomc.plugins.pano.core.platform.message.response.PongMessage
+import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
 import com.panomc.plugins.pano.core.util.ImageUtil
 import io.vertx.core.Vertx
-import io.vertx.core.buffer.Buffer
 import io.vertx.core.http.*
 import io.vertx.core.json.JsonObject
 import io.vertx.ext.web.client.HttpResponse
 import io.vertx.ext.web.client.WebClient
 import io.vertx.kotlin.coroutines.coAwait
 import io.vertx.kotlin.coroutines.dispatcher
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.awt.image.BufferedImage
+import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
@@ -35,6 +38,13 @@ class PlatformManager(
 ) {
     private var webSocket: WebSocket? = null
     private var canConnect = true // to be able to cancel connection task
+    private val pendingResponses = mutableMapOf<UUID, CompletableDeferred<PlatformMessage>>()
+
+    internal val messageResponseDefinitions = mutableSetOf<Class<out PlatformMessageResponse>>(
+        PongMessage::class.java
+    )
+
+    internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>()
 
     val connectPlatformTask: (delay: Boolean) -> Unit by lazy {
         {
@@ -126,7 +136,7 @@ class PlatformManager(
             requestBody
                 .put(
                     "favicon",
-                    if (pingData.faviconImage is BufferedImage) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage) else pingData.faviconImage
+                    ImageUtil.bufferedImageToDataUrl(pingData.faviconImage)
                 )
         }
 
@@ -241,12 +251,14 @@ class PlatformManager(
 
         onConnectionEstablished()
 
-        webSocket.closeHandler {
-            onWebSocketClosed()
+        webSocket.textMessageHandler { msg ->
+            CoroutineScope(vertx.dispatcher()).launch {
+                onWebsocketTextMessage(msg)
+            }
         }
 
-        webSocket.handler {
-            onHandleWebSocket(it)
+        webSocket.closeHandler {
+            onWebSocketClosed()
         }
     }
 
@@ -273,6 +285,36 @@ class PlatformManager(
         pluginMain.onConnectionEstablished(webSocket)
     }
 
+    private suspend fun onWebsocketTextMessage(msg: String) {
+        val json = JsonObject(msg)
+        val event = json.getString("event")
+        json.remove("event")
+
+        val eventId = if (json.getString("eventId") == null) null else UUID.fromString(json.getString("eventId"))
+
+        if (eventId == null) {
+            messageHandlerDefinitions.find { it.getHandlerName() == event }?.let {
+                val messageObj = Pano.gson.fromJson(json.encode(), it.messageClass)
+
+                @Suppress("UNCHECKED_CAST")
+                val typedListener = it as PlatformMessageHandler<PlatformMessage>
+
+                typedListener.handle(messageObj)
+            }
+
+            return
+        }
+
+        json.remove("eventId")
+
+        if (pendingResponses.containsKey(eventId)) {
+            messageResponseDefinitions.find { it.responseName() == event }?.let {
+                pendingResponses[eventId]?.complete(Pano.gson.fromJson(json.encode(), it))
+            }
+            pendingResponses.remove(eventId)
+        }
+    }
+
     private fun printLostConnectionToPlatform() {
         logger.info(pluginMain.translateColor("&6Lost connection to platform."))
     }
@@ -287,9 +329,6 @@ class PlatformManager(
 
             connectPlatformTask.invoke(true)
         }
-    }
-
-    private fun onHandleWebSocket(buffer: Buffer) {
     }
 
     private suspend fun closeConnection() {
@@ -317,7 +356,7 @@ class PlatformManager(
 
         val platformConfig = configManager.config.platform!!
 
-        platformConfig.host =  ""
+        platformConfig.host = ""
         platformConfig.port = 8080
         platformConfig.token = ""
 
@@ -344,7 +383,16 @@ class PlatformManager(
         return "&cError: Failed to connect Pano Platform. Reason: $error"
     }
 
-    fun sendRequest(serverEventRequest: ServerEventRequest) {
-        webSocket?.writeTextMessage(serverEventRequest.encode())
+    fun sendRequest(platformRequest: PlatformRequest) {
+        webSocket?.writeTextMessage(platformRequest.encode())
+    }
+
+    suspend fun <T : PlatformMessage> sendRequestAwaitResponse(
+        platformRequest: PlatformRequest
+    ): T {
+        val deferred = CompletableDeferred<T>()
+        pendingResponses[platformRequest.eventId] = deferred as CompletableDeferred<PlatformMessage>
+        webSocket?.writeTextMessage(platformRequest.encode())
+        return deferred.await()
     }
 }

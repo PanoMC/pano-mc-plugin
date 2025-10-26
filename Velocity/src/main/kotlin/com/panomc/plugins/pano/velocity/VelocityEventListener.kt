@@ -1,7 +1,8 @@
 package com.panomc.plugins.pano.velocity
 
-import com.panomc.plugins.pano.core.event.EventType
 import com.panomc.plugins.pano.core.event.Listener
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.velocitypowered.api.command.CommandSource
@@ -32,19 +33,11 @@ class VelocityEventListener(
 
     @Subscribe
     fun onPlayerJoin(event: PostLoginEvent) {
-        listeners
-            .filter { it.eventType == EventType.ON_PLAYER_JOIN }
-            .forEach { listener ->
-                listener.handle(this, event.player)
-            }
+        listeners.find { it is OnPlayerJoin }?.handle(this, event.player)
     }
 
     @Subscribe
     fun onPlayerDisconnect(event: DisconnectEvent) {
-        listeners
-            .filter { it.eventType == EventType.ON_PLAYER_DISCONNECT }
-            .forEach { listener ->
-                listener.handle(this, event.player)
-            }
+        listeners.find { it is OnPlayerDisconnect }?.handle(this, event.player)
     }
 }

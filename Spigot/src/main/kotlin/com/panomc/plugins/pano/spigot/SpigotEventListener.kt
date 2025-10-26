@@ -1,6 +1,7 @@
 package com.panomc.plugins.pano.spigot
 
-import com.panomc.plugins.pano.core.event.EventType
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import org.bukkit.command.CommandSender
@@ -31,19 +32,11 @@ class SpigotEventListener(
 
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
-        listeners
-            .filter { it.eventType == EventType.ON_PLAYER_JOIN }
-            .forEach { listener ->
-                listener.handle(this, event.player)
-            }
+        listeners.find { it is OnPlayerJoin }?.handle(this, event.player)
     }
 
     @EventHandler
     fun onPlayerDisconnect(event: PlayerQuitEvent) {
-        listeners
-            .filter { it.eventType == EventType.ON_PLAYER_DISCONNECT }
-            .forEach { listener ->
-                listener.handle(this, event.player)
-            }
+        listeners.find { it is OnPlayerDisconnect }?.handle(this, event.player)
     }
 }

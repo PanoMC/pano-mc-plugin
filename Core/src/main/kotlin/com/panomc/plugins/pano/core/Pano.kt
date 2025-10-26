@@ -1,10 +1,12 @@
 package com.panomc.plugins.pano.core
 
+import com.google.gson.GsonBuilder
 import com.panomc.plugins.pano.core.annotation.Boot
 import com.panomc.plugins.pano.core.command.CommandManager
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.event.EventManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
+import com.panomc.plugins.pano.core.platform.PlatformManager
 import com.panomc.plugins.pano.core.schedule.ScheduleManager
 import io.vertx.core.Vertx
 import io.vertx.core.VertxOptions
@@ -76,6 +78,11 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
 
         enum class EnvironmentType {
             DEVELOPMENT, RELEASE
+        }
+
+        internal val gson by lazy {
+            GsonBuilder()
+                .create()
         }
     }
 

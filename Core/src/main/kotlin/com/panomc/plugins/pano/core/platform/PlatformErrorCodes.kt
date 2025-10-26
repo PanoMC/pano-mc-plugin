@@ -1,4 +1,4 @@
-package com.panomc.plugins.pano.core
+package com.panomc.plugins.pano.core.platform
 
 enum class PlatformErrorCodes {
     NEED_PERMISSION,

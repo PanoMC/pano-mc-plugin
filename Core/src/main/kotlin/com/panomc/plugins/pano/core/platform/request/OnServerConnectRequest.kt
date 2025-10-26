@@ -1,7 +1,7 @@
-package com.panomc.plugins.pano.core.event.events
+package com.panomc.plugins.pano.core.platform.request
 
-import com.panomc.plugins.pano.core.ServerEventRequest
 import com.panomc.plugins.pano.core.ServerType
+import com.panomc.plugins.pano.core.platform.PlatformRequest
 
 data class OnServerConnectRequest(
     val serverName: String,
@@ -14,4 +14,4 @@ data class OnServerConnectRequest(
     val startTime: Long,
     val favicon: String?,
     val motd: String?
-) : ServerEventRequest()
+) : PlatformRequest()

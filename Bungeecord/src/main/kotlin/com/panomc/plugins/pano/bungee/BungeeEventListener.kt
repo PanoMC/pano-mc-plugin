@@ -1,6 +1,7 @@
 package com.panomc.plugins.pano.bungee
 
-import com.panomc.plugins.pano.core.event.EventType
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import net.md_5.bungee.api.CommandSender
@@ -33,19 +34,11 @@ class BungeeEventListener(
 
     @EventHandler
     fun onPostLogin(event: PostLoginEvent) {
-        listeners
-            .filter { it.eventType == EventType.ON_PLAYER_JOIN }
-            .forEach { listener ->
-                listener.handle(this, event.player)
-            }
+        listeners.find { it is OnPlayerJoin }?.handle(this, event.player)
     }
 
     @EventHandler
     fun onPlayerDisconnect(event: PlayerDisconnectEvent) {
-        listeners
-            .filter { it.eventType == EventType.ON_PLAYER_DISCONNECT }
-            .forEach { listener ->
-                listener.handle(this, event.player)
-            }
+        listeners.find { it is OnPlayerDisconnect }?.handle(this, event.player)
     }
 }

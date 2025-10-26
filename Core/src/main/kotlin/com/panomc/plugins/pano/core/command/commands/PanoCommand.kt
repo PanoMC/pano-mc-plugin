@@ -1,9 +1,9 @@
 package com.panomc.plugins.pano.core.command.commands
 
-import com.panomc.plugins.pano.core.PlatformManager
 import com.panomc.plugins.pano.core.annotation.Command
 import com.panomc.plugins.pano.core.helper.CommandHelper
 import com.panomc.plugins.pano.core.model.PanoError
+import com.panomc.plugins.pano.core.platform.PlatformManager
 import java.io.Console
 
 @Command
