@@ -20,3 +20,4 @@ permissions:
     default: op
     children:
       pano.admin: true
+softdepend: [ AuthMe ]

@@ -5,21 +5,30 @@ import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.spigot.integration.AuthMeIntegration
+import io.vertx.core.http.WebSocket
 import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import org.bukkit.command.CommandMap
 import org.bukkit.event.HandlerList
+import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
 import java.net.URLClassLoader
 import java.util.function.Consumer
 import java.util.logging.Logger
 
 class SpigotMain : JavaPlugin(), PanoPluginMain {
-    private lateinit var pano: Pano
+    internal lateinit var pano: Pano
     private val commands = mutableListOf<SpigotCommand>()
     private val scheduledTasks = mutableMapOf<() -> Unit, Any>()
     private val serverData by lazy { SpigotServerData(this) }
     private val mPanoLogger by lazy { getPanoLogger() }
+
+    private val integrations by lazy {
+        listOf<Integration>(
+            AuthMeIntegration(this)
+        )
+    }
 
     override fun onEnable() {
         pano = Pano.init(this)
@@ -29,14 +38,12 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
                 val scheduler = server.javaClass.getMethod("getGlobalRegionScheduler").invoke(server)
                 val runDelayed = scheduler.javaClass.getMethod(
                     "runDelayed",
-                    org.bukkit.plugin.Plugin::class.java,
+                    Plugin::class.java,
                     Consumer::class.java,
                     Long::class.javaPrimitiveType
                 )
                 val task = Consumer<Any> {
-                    if (::pano.isInitialized) {
-                        pano.onServerStart()
-                    }
+                    onStart()
                 }
                 runDelayed.invoke(scheduler, this, task, 1L)
             } catch (exception: Exception) {
@@ -44,10 +51,16 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
             }
         } else {
             server.scheduler.scheduleSyncDelayedTask(this) {
-                if (::pano.isInitialized) {
-                    pano.onServerStart()
-                }
+                onStart()
             }
+        }
+    }
+
+    private fun onStart() {
+        integrations.forEach { it.onEnable() }
+
+        if (::pano.isInitialized) {
+            pano.onServerStart()
         }
     }
 
@@ -55,6 +68,8 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         if (::pano.isInitialized) {
             pano.disable()
         }
+
+        integrations.forEach { it.onDisable() }
     }
 
     override fun registerCommands(commands: List<Command>) {
@@ -98,7 +113,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
                 val scheduler = server.javaClass.getMethod("getGlobalRegionScheduler").invoke(server)
                 val runAtFixedRate = scheduler.javaClass.getMethod(
                     "runAtFixedRate",
-                    org.bukkit.plugin.Plugin::class.java,
+                    Plugin::class.java,
                     Consumer::class.java,
                     Long::class.javaPrimitiveType,
                     Long::class.javaPrimitiveType
@@ -150,4 +165,8 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     }
 
     override fun getPanoLogger(): Logger = ColoredLogger("[Pano] ")
+
+    override fun onConnectionEstablished(webSocket: WebSocket?) {
+        integrations.forEach { it.onConnectionEstablished(webSocket) }
+    }
 }

@@ -8,6 +8,7 @@ import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
+import com.panomc.plugins.pano.core.platform.message.response.PlayerAuthenticateMessage
 import com.panomc.plugins.pano.core.platform.message.response.PongMessage
 import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
 import com.panomc.plugins.pano.core.util.Aes256GcmUtil
@@ -51,7 +52,8 @@ class PlatformManager(
     }
 
     internal val messageResponseDefinitions = mutableSetOf<Class<out PlatformMessageResponse>>(
-        PongMessage::class.java
+        PongMessage::class.java,
+        PlayerAuthenticateMessage::class.java
     )
 
     internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>()

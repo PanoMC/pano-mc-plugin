@@ -91,7 +91,8 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
     private lateinit var eventManager: EventManager
     private lateinit var commandManager: CommandManager
     private lateinit var scheduleManager: ScheduleManager
-    private lateinit var platformManager: PlatformManager
+    lateinit var platformManager: PlatformManager
+        private set
     private val logger = panoPluginMain.getPanoLogger()
     private var stopping = false
 

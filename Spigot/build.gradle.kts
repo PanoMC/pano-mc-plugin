@@ -8,6 +8,10 @@ plugins {
 group = "com.panomc.plugins.pano"
 version = rootProject.version
 
+repositories {
+    maven("https://repo.codemc.org/repository/maven-public/")
+}
+
 dependencies {
     testImplementation(kotlin("test"))
 
@@ -15,6 +19,9 @@ dependencies {
 
 //     paper / spigot20
     compileOnly("io.papermc.paper:paper-api:1.17-R0.1-SNAPSHOT")
+
+//    AuthMe Reloaded
+    compileOnly("fr.xephi:authme:5.6.1-SNAPSHOT")
 }
 
 kotlin {
