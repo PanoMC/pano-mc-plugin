@@ -1,9 +1,12 @@
 package com.panomc.plugins.pano.spigot.integration
 
+import com.panomc.plugins.pano.core.platform.message.response.IsPlayerRegisteredMessage
 import com.panomc.plugins.pano.core.platform.message.response.PlayerAuthenticateMessage
+import com.panomc.plugins.pano.core.platform.request.IsPlayerRegisteredRequest
 import com.panomc.plugins.pano.core.platform.request.PlayerAuthenticateRequest
 import com.panomc.plugins.pano.spigot.Integration
 import com.panomc.plugins.pano.spigot.SpigotMain
+import fr.xephi.authme.api.v3.AuthMeApi
 import fr.xephi.authme.events.PasswordEncryptionEvent
 import fr.xephi.authme.security.crypts.EncryptionMethod
 import fr.xephi.authme.security.crypts.HashedPassword
@@ -12,6 +15,8 @@ import kotlinx.coroutines.runBlocking
 import org.bukkit.Bukkit
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent
+import java.util.*
 
 class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
     private val logger by lazy {
@@ -20,6 +25,14 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     private val authMePlugin by lazy {
         Bukkit.getPluginManager().getPlugin("AuthMe")!!
+    }
+
+    private val authMeApi by lazy {
+        AuthMeApi.getInstance()
+    }
+
+    private val platformManager by lazy {
+        spigotMain.pano.platformManager
     }
 
     override fun onEnable() {
@@ -92,8 +105,27 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         return compatible
     }
 
+    @EventHandler(priority = EventPriority.HIGHEST)
+    fun onPlayerJoin(event: AsyncPlayerPreLoginEvent) {
+        runBlocking {
+            val playerName = event.name
+            val response =
+                platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(IsPlayerRegisteredRequest(playerName))
+
+            val registeredInAuthMe = authMeApi.isRegistered(playerName)
+
+            if (registeredInAuthMe && !response.registered) {
+                // register in Pano
+
+            } else if (!registeredInAuthMe && response.registered) {
+                // register in AuthMe
+                authMeApi.registerPlayer(playerName, UUID.randomUUID().toString())
+            }
+        }
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
-    fun onPreLogin(event: PasswordEncryptionEvent) {
+    fun onPasswordEncryptionEvent(event: PasswordEncryptionEvent) {
         event.method = object : EncryptionMethod {
             override fun computeHash(
                 password: String?,
@@ -118,7 +150,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 val success: Boolean
 
                 runBlocking {
-                    val response = spigotMain.pano.platformManager.sendMessageAwaitResponse<PlayerAuthenticateMessage>(
+                    val response = platformManager.sendMessageAwaitResponse<PlayerAuthenticateMessage>(
                         PlayerAuthenticateRequest(
                             name,
                             password
