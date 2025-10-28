@@ -88,7 +88,8 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
 
     private lateinit var applicationContext: AnnotationConfigApplicationContext
     private lateinit var configManager: ConfigManager
-    private lateinit var eventManager: EventManager
+    lateinit var eventManager: EventManager
+        private set
     private lateinit var commandManager: CommandManager
     private lateinit var scheduleManager: ScheduleManager
     lateinit var platformManager: PlatformManager

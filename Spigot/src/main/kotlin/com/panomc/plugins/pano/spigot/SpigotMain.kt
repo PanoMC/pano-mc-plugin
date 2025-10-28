@@ -23,6 +23,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     private val scheduledTasks = mutableMapOf<() -> Unit, Any>()
     private val serverData by lazy { SpigotServerData(this) }
     private val mPanoLogger by lazy { getPanoLogger() }
+    internal val eventHelper by lazy { SpigotEventHelper(this) }
 
     private val integrations by lazy {
         listOf<Integration>(
@@ -157,7 +158,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     override fun translateColor(text: String): String = ChatColor.translateAlternateColorCodes('&', text)
 
     override fun registerEventListeners(listeners: List<Listener>) {
-        server.pluginManager.registerEvents(SpigotEventListener(this, listeners), this)
+        server.pluginManager.registerEvents(SpigotEventListener(eventHelper, listeners), this)
     }
 
     override fun unregisterEventListeners(listeners: List<Listener>) {

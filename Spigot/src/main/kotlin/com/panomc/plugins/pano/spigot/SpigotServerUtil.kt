@@ -1,6 +1,7 @@
 package com.panomc.plugins.pano.spigot
 
 import com.panomc.plugins.pano.core.ServerType
+import org.bukkit.Bukkit
 
 object SpigotServerUtil {
 
@@ -31,5 +32,13 @@ object SpigotServerUtil {
                 }
             }
         }
+    }
+
+    fun getPlayerIp(playerName: String): String? {
+        val player = Bukkit.getPlayer(playerName) ?: return null
+        if (!player.isOnline) return null
+
+        val address = player.address ?: return null
+        return address.address?.hostAddress
     }
 }
