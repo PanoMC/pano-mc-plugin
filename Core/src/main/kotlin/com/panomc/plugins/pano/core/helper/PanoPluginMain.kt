@@ -2,6 +2,7 @@ package com.panomc.plugins.pano.core.helper
 
 import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
+import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import io.vertx.core.http.WebSocket
 import java.io.File
 import java.net.URLClassLoader
@@ -33,4 +34,6 @@ interface PanoPluginMain {
     fun unregisterEventListeners(listeners: List<Listener>)
 
     fun onConnectionEstablished(webSocket: WebSocket?) {}
+
+    fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {}
 }

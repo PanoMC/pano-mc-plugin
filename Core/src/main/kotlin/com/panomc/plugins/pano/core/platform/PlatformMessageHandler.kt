@@ -10,7 +10,7 @@ abstract class PlatformMessageHandler<R : PlatformMessage> {
         superclass.actualTypeArguments[0] as Class<R>
     }
 
-    abstract suspend fun handle(request: R)
+    abstract suspend fun handle(response: R)
 
     fun getHandlerName() = this.javaClass.simpleName.replace("Handler", "").convertToSnakeCase().uppercase()
 

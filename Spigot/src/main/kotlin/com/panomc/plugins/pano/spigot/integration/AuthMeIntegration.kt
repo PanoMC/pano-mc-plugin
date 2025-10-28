@@ -2,6 +2,7 @@ package com.panomc.plugins.pano.spigot.integration
 
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
+import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.message.response.IsPlayerRegisteredMessage
 import com.panomc.plugins.pano.core.platform.message.response.PlayerAuthenticateMessage
 import com.panomc.plugins.pano.core.platform.message.response.RegisterPlayerMessage
@@ -23,6 +24,7 @@ import kotlinx.coroutines.runBlocking
 import org.bukkit.Bukkit
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
+import org.bukkit.event.HandlerList
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerQuitEvent
@@ -53,10 +55,22 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
     // when register command is called, saved here
     private val pendingRegisterPasswords = mutableMapOf<String, String>()
 
-    override fun onEnable() {
+    internal var initialized: Boolean = false
+
+    private fun start() {
+        if (initialized) {
+            return
+        }
+
+        if (!platformManager.serverSettings.authIntegration) {
+            return
+        }
+
         if (!Bukkit.getPluginManager().isPluginEnabled("AuthMe")) {
             return
         }
+
+        initialized = true
 
         logger.info("&eAuthMe is enabled, hooking into AuthMe...".colorize())
 
@@ -70,6 +84,38 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             logger.info("&2AuthMe config is compatible with Pano, reloading AuthMe for fixing issues.".colorize())
             reloadAuthMe()
         }
+    }
+
+    private fun stop() {
+        if (!initialized) {
+            return
+        }
+
+        HandlerList.unregisterAll(this)
+        spigotMain.registerEventListeners(eventManager.eventListeners)
+        reloadAuthMe()
+
+        logger.info("&eAuthMe integration is disabled.".colorize())
+
+        initialized = false
+    }
+
+    override fun onConnectionEstablished(webSocket: WebSocket?) {
+        if (platformManager.serverSettings.authIntegration) {
+            start()
+            return
+        }
+
+        stop()
+    }
+
+    override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
+        if (serverSettings.authIntegration) {
+            start()
+            return
+        }
+
+        stop()
     }
 
     private fun registerEvents() {
@@ -106,8 +152,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     private fun reloadAuthMe() {
         try {
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "authme reload")
-            logger.info("AuthMe configuration reloaded".colorize())
+            Bukkit.getScheduler().runTask(spigotMain, Runnable {
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "authme reload")
+                logger.info("AuthMe configuration reloaded".colorize())
+            })
         } catch (e: Exception) {
             logger.warning("Could not reload AuthMe automatically: ${e.message}".colorize())
             logger.warning("Please run '/authme reload' manually".colorize())
@@ -411,8 +459,5 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             override fun hasSeparateSalt(): Boolean = false
 
         }
-    }
-
-    override fun onConnectionEstablished(webSocket: WebSocket?) {
     }
 }

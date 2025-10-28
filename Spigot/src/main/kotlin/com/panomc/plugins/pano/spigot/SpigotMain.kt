@@ -5,6 +5,7 @@ import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.spigot.integration.AuthMeIntegration
 import io.vertx.core.http.WebSocket
 import org.bukkit.Bukkit
@@ -169,5 +170,9 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     override fun onConnectionEstablished(webSocket: WebSocket?) {
         integrations.forEach { it.onConnectionEstablished(webSocket) }
+    }
+
+    override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
+        integrations.forEach { it.onServerSettingsChanged(serverSettings) }
     }
 }

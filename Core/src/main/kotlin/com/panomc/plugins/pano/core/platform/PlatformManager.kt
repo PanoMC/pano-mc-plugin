@@ -8,6 +8,9 @@ import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
+import com.panomc.plugins.pano.core.platform.message.handler.GetServerSettingsHandler
+import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
+import com.panomc.plugins.pano.core.platform.request.GetServerSettingsRequest
 import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
 import com.panomc.plugins.pano.core.util.Aes256GcmUtil
 import com.panomc.plugins.pano.core.util.EncryptUtil
@@ -41,13 +44,17 @@ class PlatformManager(
     private var canConnect = true // to be able to cancel connection task
     private val pendingResponses = mutableMapOf<UUID, CompletableDeferred<PlatformMessage>>()
     private val pendingResponseTypes = mutableMapOf<UUID, Class<out PlatformMessageResponse>>()
+    lateinit var serverSettings: GetServerSettingsMessage
+        internal set
 
     private var encryptionKey: SecretKey? = null
     private val decoder by lazy {
         Base64.getDecoder()
     }
 
-    internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>()
+    internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>(
+        GetServerSettingsHandler(this, pluginMain)
+    )
 
     val connectPlatformTask: (delay: Boolean, async: Boolean) -> Unit by lazy {
         { delay, async ->
@@ -102,7 +109,7 @@ class PlatformManager(
         val awaitPanoConnection = config.awaitPanoConnection
 
         if (awaitPanoConnection) {
-            logger.info(pluginMain.translateColor("&ePano MC plugin will wait for connection to Pano before the server starts."))
+            logger.info(pluginMain.translateColor("&ePano MC plugin will wait for connection to Pano before the server starts. This is recommended to synchronize the settings."))
             logger.info(pluginMain.translateColor("&eYou can disable this in config by &6await-pano-connection: false&e. &cBut this may lead in player logins even before Pano can handle!"))
         }
 
@@ -121,7 +128,7 @@ class PlatformManager(
         closeConnection()
 
         if (!isWebsocketNull) {
-            printLostConnectionToPlatform()
+            logger.info(pluginMain.translateColor("&6Disconnected from platform."))
         }
     }
 
@@ -278,8 +285,6 @@ class PlatformManager(
 
         this.webSocket = webSocket
 
-        onConnectionEstablished()
-
         webSocket.textMessageHandler { msg ->
             CoroutineScope(vertx.dispatcher()).launch {
                 onWebsocketTextMessage(msg)
@@ -289,6 +294,8 @@ class PlatformManager(
         webSocket.closeHandler {
             onWebSocketClosed()
         }
+
+        onConnectionEstablished()
     }
 
     private suspend fun onConnectionEstablished() {
@@ -311,6 +318,10 @@ class PlatformManager(
 
         logger.info(pluginMain.translateColor("Sent server info update to the platform."))
 
+        serverSettings = sendMessageAwaitResponse(GetServerSettingsRequest(), GetServerSettingsMessage::class.java)
+
+        logger.info(pluginMain.translateColor("Received server settings."))
+
         pluginMain.onConnectionEstablished(webSocket)
     }
 
@@ -323,19 +334,6 @@ class PlatformManager(
 
         val eventId = if (json.getString("eventId") == null) null else UUID.fromString(json.getString("eventId"))
 
-        if (eventId == null) {
-            messageHandlerDefinitions.find { it.getHandlerName() == event }?.let {
-                val messageObj = Pano.gson.fromJson(json.encode(), it.messageClass)
-
-                @Suppress("UNCHECKED_CAST")
-                val typedListener = it as PlatformMessageHandler<PlatformMessage>
-
-                typedListener.handle(messageObj)
-            }
-
-            return
-        }
-
         json.remove("eventId")
 
         if (pendingResponses.containsKey(eventId)) {
@@ -344,18 +342,24 @@ class PlatformManager(
                 pendingResponses[eventId]?.complete(Pano.gson.fromJson(json.encode(), responseType))
             }
             pendingResponses.remove(eventId)
+            return
         }
-    }
 
-    private fun printLostConnectionToPlatform() {
-        logger.info(pluginMain.translateColor("&6Lost connection to platform."))
+        messageHandlerDefinitions.find { it.getHandlerName() == event }?.let {
+            val messageObj = Pano.gson.fromJson(json.encode(), it.messageClass)
+
+            @Suppress("UNCHECKED_CAST")
+            val typedListener = it as PlatformMessageHandler<PlatformMessage>
+
+            typedListener.handle(messageObj)
+        }
     }
 
     private fun onWebSocketClosed() {
         webSocket = null
 
         if (canConnect) {
-            printLostConnectionToPlatform()
+            logger.info(pluginMain.translateColor("&6Lost connection to platform."))
 
             logger.info(pluginMain.translateColor("&eRetrying to connect..."))
 
