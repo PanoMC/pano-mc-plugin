@@ -19,10 +19,7 @@ import io.vertx.ext.web.client.HttpResponse
 import io.vertx.ext.web.client.WebClient
 import io.vertx.kotlin.coroutines.coAwait
 import io.vertx.kotlin.coroutines.dispatcher
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
 import java.util.*
@@ -52,19 +49,29 @@ class PlatformManager(
 
     internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>()
 
-    val connectPlatformTask: (delay: Boolean) -> Unit by lazy {
-        {
-            CoroutineScope(vertx.dispatcher()).launch {
-                if (it) {
+    val connectPlatformTask: (delay: Boolean, async: Boolean) -> Unit by lazy {
+        { delay, async ->
+            suspend fun run() {
+                if (delay) {
                     delay(TimeUnit.SECONDS.toMillis(3))
                 }
 
                 if (!isPlatformConfigured()) {
-                    return@launch
+                    return
                 }
 
                 if (canConnect) {
-                    establishConnectionToPlatform()
+                    establishConnectionToPlatform(async)
+                }
+            }
+
+            if (async) {
+                CoroutineScope(vertx.dispatcher()).launch {
+                    run()
+                }
+            } else {
+                runBlocking {
+                    run()
                 }
             }
         }
@@ -90,7 +97,16 @@ class PlatformManager(
         logger.info(pluginMain.translateColor("Connecting to platform..."))
 
         canConnect = true
-        connectPlatformTask.invoke(false)
+
+        val config = configManager.config
+        val awaitPanoConnection = config.awaitPanoConnection
+
+        if (awaitPanoConnection) {
+            logger.info(pluginMain.translateColor("&ePano MC plugin will wait for connection to Pano before the server starts."))
+            logger.info(pluginMain.translateColor("&eYou can disable this in config by &6await-pano-connection: false&e. &cBut this may lead in player logins even before Pano can handle!"))
+        }
+
+        connectPlatformTask.invoke(false, !awaitPanoConnection)
     }
 
     suspend fun stop() {
@@ -211,7 +227,7 @@ class PlatformManager(
         removePlatform()
     }
 
-    private suspend fun establishConnectionToPlatform() {
+    private suspend fun establishConnectionToPlatform(async: Boolean) {
         val platformConfig = configManager.config.platform!!
         val host = platformConfig.host
         val port = platformConfig.port
@@ -245,7 +261,7 @@ class PlatformManager(
                         return
                     }
 
-                    connectPlatformTask.invoke(true)
+                    connectPlatformTask.invoke(true, async)
 
                     return
                 }
@@ -253,7 +269,7 @@ class PlatformManager(
 
             logger.severe(pluginMain.translateColor("&cError: Failed to connect Pano Platform. Reason: ${exception.message}"))
 
-            connectPlatformTask.invoke(true)
+            connectPlatformTask.invoke(true, async)
 
             return
         }
@@ -343,7 +359,7 @@ class PlatformManager(
 
             logger.info(pluginMain.translateColor("&eRetrying to connect..."))
 
-            connectPlatformTask.invoke(true)
+            connectPlatformTask.invoke(true, true)
         }
     }
 

@@ -10,6 +10,7 @@ data class PanoConfig(
     @SerializedName("config-version") var version: Int,
     @SerializedName("public-key") var publicKey: String = String(base64Encoder.encode(keyPair.public.encoded)),
     @SerializedName("private-key") var privateKey: String = String(base64Encoder.encode(keyPair.private.encoded)),
+    @SerializedName("await-pano-connection") var awaitPanoConnection: Boolean = true,
     var platform: PlatformConfig? = PlatformConfig(),
 ) {
     companion object {

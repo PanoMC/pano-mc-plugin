@@ -1,6 +1,7 @@
 package com.panomc.plugins.pano.core.config
 
 import com.panomc.plugins.pano.core.config.migration.ConfigMigration1To2
+import com.panomc.plugins.pano.core.config.migration.ConfigMigration2To3
 import com.typesafe.config.ConfigFactory
 import com.typesafe.config.ConfigRenderOptions
 import io.vertx.config.ConfigRetriever
@@ -83,7 +84,10 @@ class ConfigManager(vertx: Vertx, private val logger: Logger, dataFolder: File) 
 
     private lateinit var configJsonObject: JsonObject
 
-    private val migrations = listOf<ConfigMigration>(ConfigMigration1To2())
+    private val migrations = listOf<ConfigMigration>(
+        ConfigMigration1To2(),
+        ConfigMigration2To3()
+    )
 
     private val configFile = File(dataFolder.path + "/config.conf")
 

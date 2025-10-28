@@ -78,7 +78,7 @@ class PanoCommand(
             "&eToken saved, please allow this server on panel of Pano platform."
         )
 
-        platformManager.connectPlatformTask.invoke(true)
+        platformManager.connectPlatformTask.invoke(true, true)
 
         return true
     }
