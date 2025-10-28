@@ -262,6 +262,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     return@runBlocking
                 }
 
+                if (authMeApi.isRegistered(playerName)) {
+                    authMeApi.forceUnregister(playerName)
+                }
+
                 val request = RegisterPlayerRequest(playerName, password, getPlayerIp(playerName) ?: "unknown")
                 val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(request)
 
@@ -323,6 +327,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     logger.severe("&c${playerName} is already registered.".colorize())
                     event.isCancelled = true
                     return@runBlocking
+                }
+
+                if (authMeApi.isRegistered(playerName)) {
+                    authMeApi.forceUnregister(playerName)
                 }
 
                 val request = RegisterPlayerRequest(playerName, password, getPlayerIp(playerName) ?: "unknown")
