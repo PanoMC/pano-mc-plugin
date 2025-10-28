@@ -152,7 +152,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         val request = RegisterPlayerRequest(playerName, pendingPassword, getPlayerIp(playerName) ?: "unknown")
 
         runBlocking {
-            val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(request)
+            val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(
+                request,
+                RegisterPlayerMessage::class.java
+            )
 
             if (registerResponse.error != null) {
                 player.kickPlayer("")
@@ -182,7 +185,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         runBlocking {
             val playerName = event.name
             val response =
-                platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(IsPlayerRegisteredRequest(playerName))
+                platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
+                    IsPlayerRegisteredRequest(playerName),
+                    IsPlayerRegisteredMessage::class.java
+                )
 
             val registeredInAuthMe = authMeApi.isRegistered(playerName)
 
@@ -224,7 +230,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
                         IsPlayerRegisteredRequest(
                             playerName
-                        )
+                        ),
+                        IsPlayerRegisteredMessage::class.java
                     )
 
                 if (response.registered) {
@@ -253,7 +260,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
                         IsPlayerRegisteredRequest(
                             playerName
-                        )
+                        ),
+                        IsPlayerRegisteredMessage::class.java
                     )
 
                 if (response.registered) {
@@ -263,7 +271,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 }
 
                 val request = RegisterPlayerRequest(playerName, password, getPlayerIp(playerName) ?: "unknown")
-                val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(request)
+                val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(
+                    request,
+                    RegisterPlayerMessage::class.java
+                )
 
                 if (registerResponse.error != null) {
                     event.isCancelled = true
@@ -320,7 +331,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
                         IsPlayerRegisteredRequest(
                             playerName
-                        )
+                        ),
+                        IsPlayerRegisteredMessage::class.java
                     )
 
                 if (response.registered) {
@@ -330,7 +342,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 }
 
                 val request = RegisterPlayerRequest(playerName, password, getPlayerIp(playerName) ?: "unknown")
-                val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(request)
+                val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(
+                    request,
+                    RegisterPlayerMessage::class.java
+                )
 
                 if (registerResponse.error != null) {
                     event.isCancelled = true
@@ -384,7 +399,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                         PlayerAuthenticateRequest(
                             name,
                             password
-                        )
+                        ),
+                        PlayerAuthenticateMessage::class.java
                     )
 
                     success = response.success

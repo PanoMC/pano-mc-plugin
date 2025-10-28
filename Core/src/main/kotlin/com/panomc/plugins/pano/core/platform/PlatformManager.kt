@@ -8,10 +8,6 @@ import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
-import com.panomc.plugins.pano.core.platform.message.response.IsPlayerRegisteredMessage
-import com.panomc.plugins.pano.core.platform.message.response.PlayerAuthenticateMessage
-import com.panomc.plugins.pano.core.platform.message.response.PongMessage
-import com.panomc.plugins.pano.core.platform.message.response.RegisterPlayerMessage
 import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
 import com.panomc.plugins.pano.core.util.Aes256GcmUtil
 import com.panomc.plugins.pano.core.util.EncryptUtil
@@ -47,18 +43,12 @@ class PlatformManager(
     private var webSocket: WebSocket? = null
     private var canConnect = true // to be able to cancel connection task
     private val pendingResponses = mutableMapOf<UUID, CompletableDeferred<PlatformMessage>>()
+    private val pendingResponseTypes = mutableMapOf<UUID, Class<out PlatformMessageResponse>>()
 
     private var encryptionKey: SecretKey? = null
     private val decoder by lazy {
         Base64.getDecoder()
     }
-
-    internal val messageResponseDefinitions = mutableSetOf<Class<out PlatformMessageResponse>>(
-        PongMessage::class.java,
-        PlayerAuthenticateMessage::class.java,
-        IsPlayerRegisteredMessage::class.java,
-        RegisterPlayerMessage::class.java
-    )
 
     internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>()
 
@@ -333,8 +323,9 @@ class PlatformManager(
         json.remove("eventId")
 
         if (pendingResponses.containsKey(eventId)) {
-            messageResponseDefinitions.find { it.responseName() == event }?.let {
-                pendingResponses[eventId]?.complete(Pano.gson.fromJson(json.encode(), it))
+            val responseType = pendingResponseTypes[eventId]!!
+            if (responseType.responseName() == event) {
+                pendingResponses[eventId]?.complete(Pano.gson.fromJson(json.encode(), responseType))
             }
             pendingResponses.remove(eventId)
         }
@@ -428,13 +419,15 @@ class PlatformManager(
         webSocket?.writeTextMessage(encryptedMessage)
     }
 
-    suspend fun <T : PlatformMessage> sendMessageAwaitResponse(
-        platformRequest: PlatformRequest
+    suspend fun <T : PlatformMessageResponse> sendMessageAwaitResponse(
+        platformRequest: PlatformRequest,
+        responseType: Class<out PlatformMessageResponse>
     ): T {
         validateEncryptionKey()
 
         val deferred = CompletableDeferred<T>()
         pendingResponses[platformRequest.eventId] = deferred as CompletableDeferred<PlatformMessage>
+        pendingResponseTypes[platformRequest.eventId] = responseType
 
         val message = platformRequest.encode()
         val encryptedMessage = Aes256GcmUtil.encrypt(message, encryptionKey!!)
