@@ -53,9 +53,6 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
     // when register command is called, saved here
     private val pendingRegisterPasswords = mutableMapOf<String, String>()
 
-    // when a player is registered in AuthMe but not in Pano, on login, we save password and register user by this
-    private val pendingLoginPasswords = mutableMapOf<String, String>()
-
     override fun onEnable() {
         if (!Bukkit.getPluginManager().isPluginEnabled("AuthMe")) {
             return
