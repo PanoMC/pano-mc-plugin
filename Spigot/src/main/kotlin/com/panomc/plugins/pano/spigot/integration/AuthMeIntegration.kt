@@ -211,11 +211,11 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         if (msg.startsWith("/register")) {
             val args = msg.split("\\s+".toRegex()) // split spaces
 
-            if (args.size != 2) {
+            if (args.size != 3) {
                 return
             }
 
-            val password = args[0]
+            val password = args[1]
 
             runBlocking {
                 val player = event.player
@@ -241,12 +241,12 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         if (msg.startsWith("/authme reg") || msg.startsWith("/authme register")) {
             val args = msg.split("\\s+".toRegex()) // split spaces
 
-            if (args.size != 2) {
+            if (args.size != 4) {
                 return
             }
 
-            val playerName = args[0]
-            val password = args[1]
+            val playerName = args[2]
+            val password = args[3]
 
             runBlocking {
                 val response =
@@ -304,12 +304,12 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         if (msg.startsWith("authme reg") || msg.startsWith("authme register")) {
             val args = msg.split("\\s+".toRegex()) // split spaces
 
-            if (args.size != 2) {
+            if (args.size != 4) {
                 return
             }
 
-            val playerName = args[0]
-            val password = args[1]
+            val playerName = args[2]
+            val password = args[3]
 
             runBlocking {
                 val response =

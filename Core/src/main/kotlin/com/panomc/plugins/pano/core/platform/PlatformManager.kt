@@ -11,6 +11,7 @@ import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseN
 import com.panomc.plugins.pano.core.platform.message.response.IsPlayerRegisteredMessage
 import com.panomc.plugins.pano.core.platform.message.response.PlayerAuthenticateMessage
 import com.panomc.plugins.pano.core.platform.message.response.PongMessage
+import com.panomc.plugins.pano.core.platform.message.response.RegisterPlayerMessage
 import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
 import com.panomc.plugins.pano.core.util.Aes256GcmUtil
 import com.panomc.plugins.pano.core.util.EncryptUtil
@@ -55,7 +56,8 @@ class PlatformManager(
     internal val messageResponseDefinitions = mutableSetOf<Class<out PlatformMessageResponse>>(
         PongMessage::class.java,
         PlayerAuthenticateMessage::class.java,
-        IsPlayerRegisteredMessage::class.java
+        IsPlayerRegisteredMessage::class.java,
+        RegisterPlayerMessage::class.java
     )
 
     internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>()
