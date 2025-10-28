@@ -262,17 +262,17 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     return@runBlocking
                 }
 
-                if (authMeApi.isRegistered(playerName)) {
-                    authMeApi.forceUnregister(playerName)
-                }
-
                 val request = RegisterPlayerRequest(playerName, password, getPlayerIp(playerName) ?: "unknown")
                 val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(request)
 
                 if (registerResponse.error != null) {
                     event.isCancelled = true
                     event.player.sendMessage("&cAn error occurred during the registration of \"$playerName\": ${registerResponse.error}".colorize())
+                    return@runBlocking
                 }
+
+                event.player.sendMessage("&2Successfully registered player \"$playerName\".".colorize())
+                logger.info("&2Successfully registered player \"$playerName\".".colorize())
             }
         }
 
@@ -290,7 +290,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST)
     fun onServerCommandProcess(event: ServerCommandEvent) {
         val msg = event.command.lowercase()
 
@@ -329,17 +329,16 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     return@runBlocking
                 }
 
-                if (authMeApi.isRegistered(playerName)) {
-                    authMeApi.forceUnregister(playerName)
-                }
-
                 val request = RegisterPlayerRequest(playerName, password, getPlayerIp(playerName) ?: "unknown")
                 val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(request)
 
                 if (registerResponse.error != null) {
                     event.isCancelled = true
                     logger.warning("&cAn error occurred: ${registerResponse.error}".colorize())
+                    return@runBlocking
                 }
+
+                logger.info("&2Successfully registered player \"$playerName\".".colorize())
             }
         }
 
