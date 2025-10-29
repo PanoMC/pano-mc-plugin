@@ -2,10 +2,8 @@ package com.panomc.plugins.pano.spigot.integration
 
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
-import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
-import com.panomc.plugins.pano.core.platform.message.response.IsPlayerRegisteredMessage
-import com.panomc.plugins.pano.core.platform.message.response.PlayerAuthenticateMessage
-import com.panomc.plugins.pano.core.platform.message.response.RegisterPlayerMessage
+import com.panomc.plugins.pano.core.platform.message.response.*
+import com.panomc.plugins.pano.core.platform.request.ChangePasswordRequest
 import com.panomc.plugins.pano.core.platform.request.IsPlayerRegisteredRequest
 import com.panomc.plugins.pano.core.platform.request.PlayerAuthenticateRequest
 import com.panomc.plugins.pano.core.platform.request.RegisterPlayerRequest
@@ -205,7 +203,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             if (registerResponse.error != null) {
                 player.kickPlayer("")
                 logger.severe("&cAn error occurred during the registration of \"$playerName\": ${registerResponse.error}".colorize())
+                return@runBlocking
             }
+
+            logger.info("&2Successfully registered player \"$playerName\".".colorize())
         }
     }
 
@@ -252,15 +253,18 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             return
         }
 
-        if (msg.startsWith("/unregister") || msg.startsWith("/authme unregister") || msg.startsWith("/authme unreg")) {
+        if (msg.startsWith("/unregister") || msg.startsWith("/authme unregister") || msg.startsWith("/authme unreg") || msg.startsWith(
+                "/changepass"
+            ) || msg.startsWith("/changepassword")
+        ) {
             event.isCancelled = true
             event.player.sendMessage("&cThis command is unsupported by Pano!".colorize())
             event.player.sendMessage("&cCheckout docs: https://panomc.com/docs".colorize())
             return
         }
 
-        if (msg.startsWith("/register")) {
-            val args = msg.split("\\s+".toRegex()) // split spaces
+        if (msg.startsWith("/register") || msg.startsWith("/reg ")) {
+            val args = event.message.split("\\s+".toRegex()) // split spaces
 
             if (args.size != 3) {
                 return
@@ -291,7 +295,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
 
         if (msg.startsWith("/authme reg") || msg.startsWith("/authme register")) {
-            val args = msg.split("\\s+".toRegex()) // split spaces
+            val args = event.message.split("\\s+".toRegex()) // split spaces
 
             if (args.size != 4) {
                 return
@@ -332,6 +336,49 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             }
         }
 
+        if (msg.startsWith("/authme changepass") || msg.startsWith("/authme changepassword")) {
+            val args = event.message.split("\\s+".toRegex()) // split spaces
+
+            if (args.size != 4) {
+                return
+            }
+
+            val playerName = args[2]
+            val password = args[3]
+
+            runBlocking {
+                val response =
+                    platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
+                        IsPlayerRegisteredRequest(
+                            playerName
+                        ),
+                        IsPlayerRegisteredMessage::class.java
+                    )
+
+                if (!response.registered) {
+                    event.isCancelled = true
+                    event.player.sendMessage("An error occurred during the change password of \"$playerName\", because they are not registered in Pano.".colorize())
+                    return@runBlocking
+                }
+
+                val request = ChangePasswordRequest(playerName, password)
+                val changePasswordResponse = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
+                    request,
+                    ChangePasswordMessage::class.java
+                )
+
+                if (changePasswordResponse.error != null) {
+                    event.isCancelled = true
+                    event.player.sendMessage("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
+                    logger.severe("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
+                    return@runBlocking
+                }
+
+                event.player.sendMessage("&2Successfully changed password of player \"$playerName\".".colorize())
+                logger.info("&2Successfully changed password of player \"$playerName\".".colorize())
+            }
+        }
+
         if (msg.startsWith("/authme reload")) {
             authMePlugin.reloadConfig()
 
@@ -362,7 +409,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
 
         if (msg.startsWith("authme reg") || msg.startsWith("authme register")) {
-            val args = msg.split("\\s+".toRegex()) // split spaces
+            val args = event.command.split("\\s+".toRegex()) // split spaces
 
             if (args.size != 4) {
                 return
@@ -399,6 +446,47 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 }
 
                 logger.info("&2Successfully registered player \"$playerName\".".colorize())
+            }
+        }
+
+        if (msg.startsWith("authme changepass") || msg.startsWith("authme changepassword")) {
+            val args = event.command.split("\\s+".toRegex()) // split spaces
+
+            if (args.size != 4) {
+                return
+            }
+
+            val playerName = args[2]
+            val password = args[3]
+
+            runBlocking {
+                val response =
+                    platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
+                        IsPlayerRegisteredRequest(
+                            playerName
+                        ),
+                        IsPlayerRegisteredMessage::class.java
+                    )
+
+                if (!response.registered) {
+                    event.isCancelled = true
+                    logger.severe("An error occurred during the change password of \"$playerName\", because they are not registered in Pano.".colorize())
+                    return@runBlocking
+                }
+
+                val request = ChangePasswordRequest(playerName, password)
+                val changePasswordResponse = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
+                    request,
+                    ChangePasswordMessage::class.java
+                )
+
+                if (changePasswordResponse.error != null) {
+                    event.isCancelled = true
+                    logger.severe("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
+                    return@runBlocking
+                }
+
+                logger.info("&2Successfully changed password of player \"$playerName\".".colorize())
             }
         }
 
