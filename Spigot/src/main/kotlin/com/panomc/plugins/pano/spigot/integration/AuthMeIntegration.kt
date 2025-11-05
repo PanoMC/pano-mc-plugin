@@ -3,10 +3,7 @@ package com.panomc.plugins.pano.spigot.integration
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.platform.message.response.*
-import com.panomc.plugins.pano.core.platform.request.ChangePasswordRequest
-import com.panomc.plugins.pano.core.platform.request.IsPlayerRegisteredRequest
-import com.panomc.plugins.pano.core.platform.request.PlayerAuthenticateRequest
-import com.panomc.plugins.pano.core.platform.request.RegisterPlayerRequest
+import com.panomc.plugins.pano.core.platform.request.*
 import com.panomc.plugins.pano.spigot.Integration
 import com.panomc.plugins.pano.spigot.SpigotMain
 import com.panomc.plugins.pano.spigot.SpigotServerUtil.getPlayerIp
@@ -226,44 +223,69 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
+    @EventHandler(priority = EventPriority.LOWEST)
     fun onPlayerJoin(event: AsyncPlayerPreLoginEvent) {
         runBlocking {
             val playerName = event.name
-            val response =
-                platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
-                    IsPlayerRegisteredRequest(playerName),
-                    IsPlayerRegisteredMessage::class.java
+            val playerInfo =
+                platformManager.sendMessageAwaitResponse<GetPlayerInfoMessage>(
+                    GetPlayerInfoRequest(playerName),
+                    GetPlayerInfoMessage::class.java
                 )
+
+            if (playerInfo.registered && !playerInfo.verified) { // registered but not verified
+
+            }
 
             val registeredInAuthMe = authMeApi.isRegistered(playerName)
 
-            if (!registeredInAuthMe && response.registered) {
+            if (!registeredInAuthMe && playerInfo.registered) {
                 // register in AuthMe
                 authMeApi.registerPlayer(playerName, UUID.randomUUID().toString())
             }
         }
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.HIGHEST)
     fun onPlayerCommandPreprocess(event: PlayerCommandPreprocessEvent) {
-        val msg = event.message.lowercase()
-
         if (event.isCancelled) {
             return
         }
 
-        if (msg.startsWith("/unregister") || msg.startsWith("/authme unregister") || msg.startsWith("/authme unreg") || msg.startsWith(
-                "/changepass"
-            ) || msg.startsWith("/changepassword")
-        ) {
+        val msg = event.message.lowercase()
+
+        val listOfUnsupported = listOf(
+            "/unregister",
+            "/authme unregister",
+            "/authme unreg",
+            "/authme changepass",
+            "/authme changepassword",
+            "/changepass",
+            "/changepassword"
+            )
+
+        if (listOfUnsupported.any { msg.startsWith(it) }) {
+            // Check permission based on command (only for admin commands)
+            val hasPermission = when {
+                msg.startsWith("/authme unregister") || msg.startsWith("/authme unreg") ->
+                    event.player.hasPermission("authme.admin.unregister")
+                msg.startsWith("/authme changepass") || msg.startsWith("/authme changepassword") ->
+                    event.player.hasPermission("authme.admin.changepassword")
+                else -> false
+            }
+
+            // If player has permission, let AuthMe handle it
+            if (hasPermission) {
+                return
+            }
+
             event.isCancelled = true
             event.player.sendMessage("&cThis command is unsupported by Pano!".colorize())
             event.player.sendMessage("&cCheckout docs: https://panomc.com/docs".colorize())
             return
         }
 
-        if (msg.startsWith("/register") || msg.startsWith("/reg ")) {
+        if ((msg.startsWith("/register ") || msg.startsWith("/reg ")) && authMeApi.isAuthenticated(event.player)) {
             val args = event.message.split("\\s+".toRegex()) // split spaces
 
             if (args.size != 3) {
@@ -295,6 +317,11 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
 
         if (msg.startsWith("/authme reg") || msg.startsWith("/authme register")) {
+            // If player doesn't have permission, let AuthMe handle the permission check
+            if (!event.player.hasPermission("authme.admin.register")) {
+                return
+            }
+
             val args = event.message.split("\\s+".toRegex()) // split spaces
 
             if (args.size != 4) {
@@ -336,50 +363,12 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             }
         }
 
-        if (msg.startsWith("/authme changepass") || msg.startsWith("/authme changepassword")) {
-            val args = event.message.split("\\s+".toRegex()) // split spaces
-
-            if (args.size != 4) {
+        if (msg.startsWith("/authme reload")) {
+            // If player doesn't have permission, let AuthMe handle the permission check
+            if (!event.player.hasPermission("authme.admin.reload")) {
                 return
             }
 
-            val playerName = args[2]
-            val password = args[3]
-
-            runBlocking {
-                val response =
-                    platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
-                        IsPlayerRegisteredRequest(
-                            playerName
-                        ),
-                        IsPlayerRegisteredMessage::class.java
-                    )
-
-                if (!response.registered) {
-                    event.isCancelled = true
-                    event.player.sendMessage("An error occurred during the change password of \"$playerName\", because they are not registered in Pano.".colorize())
-                    return@runBlocking
-                }
-
-                val request = ChangePasswordRequest(playerName, password)
-                val changePasswordResponse = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
-                    request,
-                    ChangePasswordMessage::class.java
-                )
-
-                if (changePasswordResponse.error != null) {
-                    event.isCancelled = true
-                    event.player.sendMessage("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
-                    logger.severe("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
-                    return@runBlocking
-                }
-
-                event.player.sendMessage("&2Successfully changed password of player \"$playerName\".".colorize())
-                logger.info("&2Successfully changed password of player \"$playerName\".".colorize())
-            }
-        }
-
-        if (msg.startsWith("/authme reload")) {
             authMePlugin.reloadConfig()
 
             if (!isConfigCompatible()) {
@@ -393,15 +382,16 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.HIGHEST)
     fun onServerCommandProcess(event: ServerCommandEvent) {
         val msg = event.command.lowercase()
 
-        if (event.isCancelled) {
-            return
-        }
+        val listOfUnsupported = listOf(
+            "authme unregister",
+            "authme unreg"
+        )
 
-        if (msg.startsWith("authme unregister") || msg.startsWith("authme unreg")) {
+        if (listOfUnsupported.any { msg.startsWith(it) }) {
             event.isCancelled = true
             event.sender.sendMessage("&cThis command is unsupported by Pano!".colorize())
             event.sender.sendMessage("&cCheckout docs: https://panomc.com/docs".colorize())

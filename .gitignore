@@ -5,3 +5,6 @@ build
 out
 
 *.jar
+
+bin
+.vscode

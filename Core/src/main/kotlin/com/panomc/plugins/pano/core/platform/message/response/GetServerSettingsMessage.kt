@@ -5,5 +5,6 @@ import com.panomc.plugins.pano.core.platform.PlatformMessageResponse
 data class GetServerSettingsMessage(
     val authIntegration: Boolean,
     val banIntegration: Boolean,
-    val permissionIntegration: Boolean
+    val permissionIntegration: Boolean,
+    val translations: Map<String, Map<String, String>>
 ) : PlatformMessageResponse

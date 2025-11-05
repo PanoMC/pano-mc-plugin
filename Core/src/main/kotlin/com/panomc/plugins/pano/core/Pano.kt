@@ -8,8 +8,10 @@ import com.panomc.plugins.pano.core.event.EventManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.platform.PlatformManager
 import com.panomc.plugins.pano.core.schedule.ScheduleManager
+import com.panomc.plugins.pano.core.util.deseriliazer.JsonObjectDeserializer
 import io.vertx.core.Vertx
 import io.vertx.core.VertxOptions
+import io.vertx.core.json.JsonObject
 import io.vertx.kotlin.coroutines.CoroutineVerticle
 import io.vertx.kotlin.coroutines.coAwait
 import kotlinx.coroutines.runBlocking
@@ -82,6 +84,7 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
 
         internal val gson by lazy {
             GsonBuilder()
+                .registerTypeAdapter(JsonObject::class.java, JsonObjectDeserializer())
                 .create()
         }
     }
