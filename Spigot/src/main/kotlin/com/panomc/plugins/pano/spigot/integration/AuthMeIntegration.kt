@@ -240,8 +240,11 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             val registeredInAuthMe = authMeApi.isRegistered(playerName)
 
             if (!registeredInAuthMe && playerInfo.registered) {
-                // register in AuthMe
+                // registered in Pano but not in AuthMe
                 authMeApi.registerPlayer(playerName, UUID.randomUUID().toString())
+            } else if (registeredInAuthMe && !playerInfo.registered) {
+                // registered in AuthMe but not in Pano
+                authMeApi.forceUnregister(playerName)
             }
         }
     }
@@ -257,11 +260,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         val listOfUnsupported = listOf(
             "/unregister",
             "/authme unregister",
-            "/authme unreg",
-            "/authme changepass",
-            "/authme changepassword",
-            "/changepass",
-            "/changepassword"
+            "/authme unreg"
             )
 
         if (listOfUnsupported.any { msg.startsWith(it) }) {
@@ -283,37 +282,6 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             event.player.sendMessage("&cThis command is unsupported by Pano!".colorize())
             event.player.sendMessage("&cCheckout docs: https://panomc.com/docs".colorize())
             return
-        }
-
-        if ((msg.startsWith("/register ") || msg.startsWith("/reg ")) && authMeApi.isAuthenticated(event.player)) {
-            val args = event.message.split("\\s+".toRegex()) // split spaces
-
-            if (args.size != 3) {
-                return
-            }
-
-            val password = args[1]
-
-            runBlocking {
-                val player = event.player
-                val playerName = player.name
-                val response =
-                    platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
-                        IsPlayerRegisteredRequest(
-                            playerName
-                        ),
-                        IsPlayerRegisteredMessage::class.java
-                    )
-
-                if (response.registered) {
-                    event.isCancelled = true
-                    player.kickPlayer("")
-                    logger.severe("Kicked player \"$playerName\", because they are already registered in Pano.".colorize())
-                    return@runBlocking
-                }
-
-                pendingRegisterPasswords[playerName] = password
-            }
         }
 
         if (msg.startsWith("/authme reg") || msg.startsWith("/authme register")) {
@@ -439,47 +407,6 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             }
         }
 
-        if (msg.startsWith("authme changepass") || msg.startsWith("authme changepassword")) {
-            val args = event.command.split("\\s+".toRegex()) // split spaces
-
-            if (args.size != 4) {
-                return
-            }
-
-            val playerName = args[2]
-            val password = args[3]
-
-            runBlocking {
-                val response =
-                    platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
-                        IsPlayerRegisteredRequest(
-                            playerName
-                        ),
-                        IsPlayerRegisteredMessage::class.java
-                    )
-
-                if (!response.registered) {
-                    event.isCancelled = true
-                    logger.severe("An error occurred during the change password of \"$playerName\", because they are not registered in Pano.".colorize())
-                    return@runBlocking
-                }
-
-                val request = ChangePasswordRequest(playerName, password)
-                val changePasswordResponse = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
-                    request,
-                    ChangePasswordMessage::class.java
-                )
-
-                if (changePasswordResponse.error != null) {
-                    event.isCancelled = true
-                    logger.severe("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
-                    return@runBlocking
-                }
-
-                logger.info("&2Successfully changed password of player \"$playerName\".".colorize())
-            }
-        }
-
         if (msg.startsWith("authme reload")) {
             authMePlugin.reloadConfig()
 
@@ -492,22 +419,58 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
     }
 
+    private fun handleComputeHash(playerName: String, password: String) {
+        runBlocking {
+            val response =
+                platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
+                    IsPlayerRegisteredRequest(
+                        playerName
+                    ),
+                    IsPlayerRegisteredMessage::class.java
+                )
+
+            if (!response.registered) {
+                pendingRegisterPasswords[playerName] = password
+
+                return@runBlocking
+            }
+
+            val request = ChangePasswordRequest(playerName, password)
+
+            val changePasswordResponse = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
+                request,
+                ChangePasswordMessage::class.java
+            )
+
+            if (changePasswordResponse.error == null) {
+                return@runBlocking
+            }
+
+            logger.severe("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
+            return@runBlocking
+        }
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
     fun onPasswordEncryptionEvent(event: PasswordEncryptionEvent) {
         event.method = object : EncryptionMethod {
             override fun computeHash(
-                password: String?,
-                name: String?
+                password: String,
+                name: String
             ): HashedPassword {
+                handleComputeHash(name, password)
+
                 return HashedPassword(password)
             }
 
             override fun computeHash(
-                password: String?,
+                password: String,
                 salt: String?,
-                name: String?
+                name: String
             ): String {
-                return ""
+                handleComputeHash(name, password)
+
+                return password
             }
 
             override fun comparePassword(
@@ -532,7 +495,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 return success
             }
 
-            override fun generateSalt(): String = ""
+            override fun generateSalt(): String? = null
 
             override fun hasSeparateSalt(): Boolean = false
 
