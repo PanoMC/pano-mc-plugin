@@ -47,6 +47,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         spigotMain.pano.eventManager
     }
 
+    private val i18nManager by lazy {
+        spigotMain.pano.i18nManager
+    }
+
     // when register command is called, saved here
     private val pendingRegisterPasswords = mutableMapOf<String, String>()
 
@@ -233,8 +237,10 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     GetPlayerInfoMessage::class.java
                 )
 
-            if (playerInfo.registered && !playerInfo.verified) { // registered but not verified
+            if (playerInfo.registered && !playerInfo.verified) { // registered but not verified, kick
+                val message = i18nManager.translate(playerInfo, "auth.not-verified", mapOf("email" to (playerInfo.email ?: "")))!!
 
+                event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, message.colorize())
             }
 
             val registeredInAuthMe = authMeApi.isRegistered(playerName)
