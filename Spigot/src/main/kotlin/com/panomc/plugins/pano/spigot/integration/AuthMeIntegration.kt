@@ -4,6 +4,7 @@ import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.platform.message.response.*
 import com.panomc.plugins.pano.core.platform.request.*
+import com.panomc.plugins.pano.core.util.EmailUtil.maskEmail
 import com.panomc.plugins.pano.spigot.Integration
 import com.panomc.plugins.pano.spigot.SpigotMain
 import com.panomc.plugins.pano.spigot.SpigotServerUtil.getPlayerIp
@@ -238,7 +239,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 )
 
             if (playerInfo.registered && !playerInfo.verified) { // registered but not verified, kick
-                val message = i18nManager.translate(playerInfo, "auth.not-verified", mapOf("email" to (playerInfo.email ?: "")))!!
+                val message = i18nManager.translate(playerInfo, "auth.not-verified", mapOf("email" to maskEmail(playerInfo.email)))!!
 
                 event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, message.colorize())
             }
