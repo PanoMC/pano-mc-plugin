@@ -34,6 +34,9 @@ dependencies {
 
     // https://mvnrepository.com/artifact/com.google.code.gson/gson
     api("com.google.code.gson:gson:${gsonVersion}")
+
+    // Handlebars for template rendering in translations
+    api("com.github.jknack:handlebars:4.3.1")
 }
 
 kotlin {

@@ -12,6 +12,9 @@ class GetServerSettingsHandler(
     override suspend fun handle(response: GetServerSettingsMessage) {
         platformManager.serverSettings = response
 
+        // Update I18nManager cache when server settings change
+        platformManager.i18nManager.updateCache(response)
+
         pluginMain.getPanoLogger().info(pluginMain.translateColor("&eServer settings changed."))
 
         pluginMain.onServerSettingsChanged(response)

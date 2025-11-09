@@ -4,6 +4,7 @@ import com.panomc.plugins.pano.core.command.CommandManager
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.event.EventManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
+import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.platform.PlatformManager
 import com.panomc.plugins.pano.core.schedule.ScheduleManager
@@ -69,7 +70,8 @@ open class SpringConfig {
         configManager: ConfigManager,
         webClient: WebClient,
         webSocketClient: WebSocketClient,
-        minecraftStatusClient: MinecraftStatusClient
+        minecraftStatusClient: MinecraftStatusClient,
+        i18nManager: I18nManager
     ) = PlatformManager(
         vertx,
         panoPluginMain.getPanoLogger(),
@@ -78,7 +80,8 @@ open class SpringConfig {
         webSocketClient,
         minecraftStatusClient,
         panoPluginMain.getServerData(),
-        panoPluginMain
+        panoPluginMain,
+        i18nManager
     )
 
     @Bean
@@ -96,5 +99,9 @@ open class SpringConfig {
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
     open fun provideMinecraftStatusClient(): MinecraftStatusClient = MinecraftStatusClient(vertx)
 
+    @Bean
+    @Lazy
+    @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
+    open fun i18nManager(logger: Logger) = I18nManager(logger)
 
 }

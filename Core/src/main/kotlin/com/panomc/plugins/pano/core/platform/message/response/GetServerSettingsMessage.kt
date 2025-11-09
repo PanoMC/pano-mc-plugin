@@ -6,5 +6,6 @@ data class GetServerSettingsMessage(
     val authIntegration: Boolean,
     val banIntegration: Boolean,
     val permissionIntegration: Boolean,
-    val translations: Map<String, Map<String, String>>
+    val translations: Map<String, Map<String, String>>,
+    val locale: String,
 ) : PlatformMessageResponse

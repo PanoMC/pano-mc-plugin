@@ -5,6 +5,7 @@ import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.config.PanoConfig
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
@@ -38,7 +39,8 @@ class PlatformManager(
     private val webSocketClient: WebSocketClient,
     private val minecraftStatusClient: MinecraftStatusClient,
     private val serverData: ServerData,
-    private val pluginMain: PanoPluginMain
+    private val pluginMain: PanoPluginMain,
+    val i18nManager: I18nManager
 ) {
     private var webSocket: WebSocket? = null
     private var canConnect = true // to be able to cancel connection task
@@ -319,6 +321,9 @@ class PlatformManager(
         logger.info(pluginMain.translateColor("Sent server info update to the platform."))
 
         serverSettings = sendMessageAwaitResponse(GetServerSettingsRequest(), GetServerSettingsMessage::class.java)
+
+        // Update I18nManager cache when server settings are received
+        i18nManager.updateCache(serverSettings)
 
         logger.info(pluginMain.translateColor("Received server settings."))
 

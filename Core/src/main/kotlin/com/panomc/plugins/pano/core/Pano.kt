@@ -6,6 +6,7 @@ import com.panomc.plugins.pano.core.command.CommandManager
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.event.EventManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
+import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.platform.PlatformManager
 import com.panomc.plugins.pano.core.schedule.ScheduleManager
 import com.panomc.plugins.pano.core.util.deseriliazer.JsonObjectDeserializer
@@ -97,6 +98,8 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
     private lateinit var scheduleManager: ScheduleManager
     lateinit var platformManager: PlatformManager
         private set
+    lateinit var i18nManager: I18nManager
+        private set
     private val logger = panoPluginMain.getPanoLogger()
     private var stopping = false
 
@@ -172,6 +175,7 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
 
         applicationContext = AnnotationConfigApplicationContext(SpringConfig::class.java)
         scheduleManager = applicationContext.getBean(ScheduleManager::class.java)
+        i18nManager = applicationContext.getBean(I18nManager::class.java)
         platformManager = applicationContext.getBean(PlatformManager::class.java)
     }
 
