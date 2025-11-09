@@ -6,6 +6,6 @@ data class GetPlayerInfoMessage(
     val registered: Boolean,
     val banned: Boolean,
     val verified: Boolean,
-    val pendingEmail: String? = null,
+    val email: String? = null,
     val locale: String? = null,
 ) : PlatformMessageResponse
