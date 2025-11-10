@@ -41,7 +41,8 @@ class I18nManager(
     private val translationsCache = mutableMapOf<String, Map<String, String>>()
     
     // Cached platform locale
-    private var platformLocale: String = "en-US"
+    var platformLocale: String = "en-US"
+        private set
     
     // Handlebars instance for rendering translations with variables
     private val handlebars by lazy { Handlebars() }
@@ -82,8 +83,8 @@ class I18nManager(
      * @param key Translation key
      * @return The translation value or null if not found
      */
-    fun getTranslation(key: String): String? {
-        val translations = translationsCache[platformLocale]
+    fun getTranslation(locale: String, key: String): String? {
+        val translations = translationsCache[locale]
         return translations?.get(key)
     }
 
@@ -136,10 +137,11 @@ class I18nManager(
      * @return The rendered translation string or null if translation not found
      */
     fun translate(
+        locale: String,
         key: String,
         variables: Map<String, Any> = emptyMap()
     ): String? {
-        val translationTemplate = getTranslation(key) ?: return null
+        val translationTemplate = getTranslation(locale, key) ?: return null
 
         // If no variables provided, return the translation as-is
         if (variables.isEmpty()) {

@@ -209,6 +209,12 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             }
 
             logger.info("&2Successfully registered player \"$playerName\".".colorize())
+
+            if (platformManager.serverSettings.authKickAfterRegister) {
+                val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")!!
+
+                player.kickPlayer(message.colorize())
+            }
         }
     }
 
@@ -238,8 +244,9 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                     GetPlayerInfoMessage::class.java
                 )
 
-            if (playerInfo.registered && !playerInfo.verified) { // registered but not verified, kick
-                val message = i18nManager.translate(playerInfo, "auth.not-verified", mapOf("email" to maskEmail(playerInfo.email)))!!
+            if (platformManager.serverSettings.authRequireVerified && playerInfo.registered && !playerInfo.verified) { // registered but not verified, kick
+                val key = if (playerInfo.email.isNullOrBlank()) "auth.register-kick" else "auth.not-verified"
+                val message = i18nManager.translate(playerInfo, key, mapOf("email" to maskEmail(playerInfo.email)))!!
 
                 event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, message.colorize())
             }
@@ -335,6 +342,14 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
                 event.player.sendMessage("&2Successfully registered player \"$playerName\".".colorize())
                 logger.info("&2Successfully registered player \"$playerName\".".colorize())
+
+                val player = Bukkit.getPlayer(playerName)
+
+                if ((player?.isOnline ?: false) && platformManager.serverSettings.authKickAfterRegister) {
+                    val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")!!
+
+                    player.kickPlayer(message.colorize())
+                }
             }
         }
 
@@ -411,6 +426,14 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 }
 
                 logger.info("&2Successfully registered player \"$playerName\".".colorize())
+
+                val player = Bukkit.getPlayer(playerName)
+
+                if ((player?.isOnline ?: false) && platformManager.serverSettings.authKickAfterRegister) {
+                    val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")!!
+
+                    player.kickPlayer(message.colorize())
+                }
             }
         }
 
