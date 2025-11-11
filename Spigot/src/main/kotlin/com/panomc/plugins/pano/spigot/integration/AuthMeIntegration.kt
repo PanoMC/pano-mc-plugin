@@ -18,6 +18,8 @@ import fr.xephi.authme.security.crypts.HashedPassword
 import io.vertx.core.http.WebSocket
 import kotlinx.coroutines.runBlocking
 import org.bukkit.Bukkit
+import org.bukkit.configuration.file.FileConfiguration
+import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
@@ -25,9 +27,50 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.server.ServerCommandEvent
+import java.io.File
 import java.util.*
 
 class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
+
+    private data class ConfigSetting(
+        val path: String,
+        val expectedValue: Any,
+        val getValue: (FileConfiguration) -> Any?,
+        val logMessage: String
+    )
+
+    private val requiredConfigSettings = listOf(
+        ConfigSetting(
+            path = "settings.security.passwordHash",
+            expectedValue = "CUSTOM",
+            getValue = { it.getString("settings.security.passwordHash") },
+            logMessage = "Set AuthMe password hash to CUSTOM"
+        ),
+        ConfigSetting(
+            path = "settings.registration.type",
+            expectedValue = "PASSWORD",
+            getValue = { it.getString("settings.registration.type") },
+            logMessage = "Set AuthMe register type to PASSWORD"
+        ),
+        ConfigSetting(
+            path = "settings.security.minPasswordLength",
+            expectedValue = 6,
+            getValue = { it.getInt("settings.security.minPasswordLength") },
+            logMessage = "Set AuthMe min password length to 6"
+        ),
+        ConfigSetting(
+            path = "settings.security.passwordMaxLength",
+            expectedValue = 128,
+            getValue = { it.getInt("settings.security.passwordMaxLength") },
+            logMessage = "Set AuthMe password max length to 128"
+        ),
+        ConfigSetting(
+            path = "settings.restrictions.allowedNicknameCharacters",
+            expectedValue = "[a-zA-Z0-9_]*",
+            getValue = { it.getString("settings.restrictions.allowedNicknameCharacters") },
+            logMessage = "Set AuthMe allowed nickname characters to [a-zA-Z0-9_]*"
+        )
+    )
     private val logger by lazy {
         spigotMain.getPanoLogger()
     }
@@ -127,44 +170,50 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     private fun forceConfig() {
         val config = authMePlugin.config
+        val backupValues = mutableMapOf<String, Any?>()
 
-        var configChanged = false
-
-        if (config.getString("settings.security.passwordHash") != "CUSTOM") {
-            configChanged = true
-            config.set("settings.security.passwordHash", "CUSTOM")
-            logger.info("Set AuthMe password hash to CUSTOM".colorize())
+        requiredConfigSettings.forEach { setting ->
+            val currentValue = setting.getValue(config)
+            if (currentValue != setting.expectedValue) {
+                backupValues[setting.path] = currentValue
+                config.set(setting.path, setting.expectedValue)
+                logger.info(setting.logMessage.colorize())
+            }
         }
 
-        if (config.getString("settings.registration.type") != "PASSWORD") {
-            configChanged = true
-            config.set("settings.registration.type", "PASSWORD")
-            logger.info("Set AuthMe register type to PASSWORD".colorize())
-        }
-
-        if (config.getInt("settings.security.minPasswordLength") != 6) {
-            configChanged = true
-            config.set("settings.security.minPasswordLength", 6)
-            logger.info("Set AuthMe min password length to 6".colorize())
-        }
-
-        if (config.getInt("settings.security.passwordMaxLength") != 128) {
-            configChanged = true
-            config.set("settings.security.passwordMaxLength", 128)
-            logger.info("Set AuthMe password max length to 128".colorize())
-        }
-
-        if (config.getString("settings.restrictions.allowedNicknameCharacters") != "[a-zA-Z0-9_]*") {
-            configChanged = true
-            config.set("settings.restrictions.allowedNicknameCharacters", "[a-zA-Z0-9_]*")
-            logger.info("Set AuthMe allowed nickname characters to [a-zA-Z0-9_]*".colorize())
-        }
-
-        if (configChanged) {
+        if (backupValues.isNotEmpty()) {
+            // Save backup before changing config
+            saveBackup(backupValues)
+            
             authMePlugin.saveConfig()
             logger.info("AuthMe configuration has been updated for Pano integration".colorize())
 
             reloadAuthMe()
+        }
+    }
+
+    private fun saveBackup(backupValues: Map<String, Any?>) {
+        try {
+            val dataFolder = spigotMain.dataFolder
+            val backupFile = File(dataFolder, "authme-backup.yml")
+
+            val backupConfig = if (backupFile.exists()) {
+                YamlConfiguration.loadConfiguration(backupFile)
+            } else {
+                YamlConfiguration()
+            }
+
+            // Update backup values (overwrite existing ones)
+            backupValues.forEach { (key, value) ->
+                backupConfig.set(key, value)
+            }
+
+            backupFile.parentFile?.mkdirs()
+            backupConfig.save(backupFile)
+
+            logger.info("AuthMe backup saved to authme-backup.yml".colorize())
+        } catch (e: Exception) {
+            logger.warning("Failed to save AuthMe backup: ${e.message}".colorize())
         }
     }
 
@@ -185,29 +234,9 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
     private fun isConfigCompatible(): Boolean {
         val config = authMePlugin.config
 
-        var compatible = true
-
-        if (config.getString("settings.security.passwordHash") != "CUSTOM") {
-            compatible = false
+        return requiredConfigSettings.all { setting ->
+            setting.getValue(config) == setting.expectedValue
         }
-
-        if (config.getString("settings.registration.type") != "PASSWORD") {
-            compatible = false
-        }
-
-        if (config.getInt("settings.security.minPasswordLength") != 6) {
-            compatible = false
-        }
-
-        if (config.getInt("settings.security.passwordMaxLength") != 128) {
-            compatible = false
-        }
-
-        if (config.getString("settings.restrictions.allowedNicknameCharacters") != "[a-zA-Z0-9_]*") {
-            compatible = false
-        }
-
-        return compatible
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
