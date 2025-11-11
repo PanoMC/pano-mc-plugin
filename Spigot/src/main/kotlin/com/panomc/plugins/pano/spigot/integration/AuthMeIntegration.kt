@@ -142,6 +142,24 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             logger.info("Set AuthMe register type to PASSWORD".colorize())
         }
 
+        if (config.getInt("settings.security.minPasswordLength") != 6) {
+            configChanged = true
+            config.set("settings.security.minPasswordLength", 6)
+            logger.info("Set AuthMe min password length to 6".colorize())
+        }
+
+        if (config.getInt("settings.security.passwordMaxLength") != 128) {
+            configChanged = true
+            config.set("settings.security.passwordMaxLength", 128)
+            logger.info("Set AuthMe password max length to 128".colorize())
+        }
+
+        if (config.getString("settings.restrictions.allowedNicknameCharacters") != "[a-zA-Z0-9_]*") {
+            configChanged = true
+            config.set("settings.restrictions.allowedNicknameCharacters", "[a-zA-Z0-9_]*")
+            logger.info("Set AuthMe allowed nickname characters to [a-zA-Z0-9_]*".colorize())
+        }
+
         if (configChanged) {
             authMePlugin.saveConfig()
             logger.info("AuthMe configuration has been updated for Pano integration".colorize())
@@ -174,6 +192,18 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
 
         if (config.getString("settings.registration.type") != "PASSWORD") {
+            compatible = false
+        }
+
+        if (config.getInt("settings.security.minPasswordLength") != 6) {
+            compatible = false
+        }
+
+        if (config.getInt("settings.security.passwordMaxLength") != 128) {
+            compatible = false
+        }
+
+        if (config.getString("settings.restrictions.allowedNicknameCharacters") != "[a-zA-Z0-9_]*") {
             compatible = false
         }
 
