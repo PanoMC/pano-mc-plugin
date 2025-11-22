@@ -79,9 +79,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         Bukkit.getPluginManager().getPlugin("AuthMe")!!
     }
 
-    private val authMeApi by lazy {
-        AuthMeApi.getInstance()
-    }
+    private lateinit var authMeApi: AuthMeApi
 
     private val platformManager by lazy {
         spigotMain.pano.platformManager
@@ -112,6 +110,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         if (!Bukkit.getPluginManager().isPluginEnabled("AuthMe")) {
             return
         }
+
+        authMeApi = AuthMeApi.getInstance()
 
         initialized = true
 
