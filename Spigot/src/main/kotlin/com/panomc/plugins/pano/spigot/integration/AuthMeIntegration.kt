@@ -16,6 +16,9 @@ import fr.xephi.authme.events.RegisterEvent
 import fr.xephi.authme.security.crypts.EncryptionMethod
 import fr.xephi.authme.security.crypts.HashedPassword
 import io.vertx.core.http.WebSocket
+import io.vertx.kotlin.coroutines.dispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.bukkit.Bukkit
 import org.bukkit.configuration.file.FileConfiguration
@@ -249,13 +252,13 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         val player = event.player
         val playerName = player.name
 
-        val pendingPassword = pendingRegisterPasswords[playerName] ?: return
+        val pendingPassword = pendingRegisterPasswords[playerName.lowercase()] ?: return
 
-        pendingRegisterPasswords.remove(playerName)
-
-        val request = RegisterPlayerRequest(playerName, pendingPassword, getPlayerIp(playerName) ?: "unknown")
+        pendingRegisterPasswords.remove(playerName.lowercase())
 
         runBlocking {
+            val request = RegisterPlayerRequest(playerName, pendingPassword, getPlayerIp(playerName) ?: "unknown")
+
             val registerResponse = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(
                 request,
                 RegisterPlayerMessage::class.java
@@ -288,8 +291,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             eventManager.eventListeners.find { it is OnPlayerDisconnect }?.handle(spigotMain.eventHelper, event.player)
         }
 
-        if (pendingRegisterPasswords[event.player.name] != null) {
-            pendingRegisterPasswords.remove(event.player.name)
+        if (pendingRegisterPasswords[event.player.name.lowercase()] != null) {
+            pendingRegisterPasswords.remove(event.player.name.lowercase())
         }
     }
 
@@ -519,7 +522,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
                 )
 
             if (!response.registered) {
-                pendingRegisterPasswords[playerName] = password
+                pendingRegisterPasswords[playerName.lowercase()] = password
 
                 return@runBlocking
             }
