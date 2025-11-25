@@ -5,6 +5,8 @@ import java.util.*
 interface EventHelper {
     fun sendMessage(commandSender: Any, message: String)
 
+    fun kick(commandSender: Any, message: String)
+
     fun convertToPlayerData(player: Any): PlayerData
 
     companion object {

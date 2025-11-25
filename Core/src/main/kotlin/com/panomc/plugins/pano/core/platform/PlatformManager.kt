@@ -9,6 +9,7 @@ import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
+import com.panomc.plugins.pano.core.platform.message.handler.BanPlayerHandler
 import com.panomc.plugins.pano.core.platform.message.handler.GetServerSettingsHandler
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.request.GetServerSettingsRequest
@@ -55,7 +56,8 @@ class PlatformManager(
     }
 
     internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>(
-        GetServerSettingsHandler(this, pluginMain)
+        GetServerSettingsHandler(this, pluginMain),
+        BanPlayerHandler(this, pluginMain)
     )
 
     val connectPlatformTask: (delay: Boolean, async: Boolean) -> Unit by lazy {

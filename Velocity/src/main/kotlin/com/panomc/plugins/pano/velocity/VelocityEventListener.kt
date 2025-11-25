@@ -10,15 +10,20 @@ import com.velocitypowered.api.event.Subscribe
 import com.velocitypowered.api.event.connection.DisconnectEvent
 import com.velocitypowered.api.event.connection.PostLoginEvent
 import com.velocitypowered.api.proxy.Player
+import kotlinx.coroutines.runBlocking
 import net.kyori.adventure.text.Component
 
 class VelocityEventListener(
     private val pluginMain: PanoPluginMain,
-    private val listeners: List<Listener>
+    internal val listeners: MutableSet<Listener>
 ) : EventHelper {
 
     override fun sendMessage(commandSender: Any, message: String) {
         (commandSender as CommandSource).sendMessage(Component.text(pluginMain.translateColor(message)))
+    }
+
+    override fun kick(commandSender: Any, message: String) {
+        (commandSender as Player).disconnect(Component.text(pluginMain.translateColor(message)))
     }
 
     override fun convertToPlayerData(player: Any): EventHelper.Companion.PlayerData {
@@ -33,11 +38,15 @@ class VelocityEventListener(
 
     @Subscribe
     fun onPlayerJoin(event: PostLoginEvent) {
-        listeners.find { it is OnPlayerJoin }?.handle(this, event.player)
+        runBlocking {
+            listeners.find { it is OnPlayerJoin }?.handle(this@VelocityEventListener, event.player)
+        }
     }
 
     @Subscribe
     fun onPlayerDisconnect(event: DisconnectEvent) {
-        listeners.find { it is OnPlayerDisconnect }?.handle(this, event.player)
+        runBlocking {
+            listeners.find { it is OnPlayerDisconnect }?.handle(this@VelocityEventListener, event.player)
+        }
     }
 }

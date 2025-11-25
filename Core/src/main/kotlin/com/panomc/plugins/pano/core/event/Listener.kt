@@ -3,5 +3,5 @@ package com.panomc.plugins.pano.core.event
 import com.panomc.plugins.pano.core.helper.EventHelper
 
 interface Listener {
-    fun handle(eventHelper: EventHelper, vararg args: Any)
+    suspend fun handle(eventHelper: EventHelper, vararg args: Any)
 }

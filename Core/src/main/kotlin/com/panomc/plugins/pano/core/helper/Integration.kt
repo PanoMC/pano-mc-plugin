@@ -1,10 +1,9 @@
-package com.panomc.plugins.pano.spigot
+package com.panomc.plugins.pano.core.helper
 
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import io.vertx.core.http.WebSocket
-import org.bukkit.event.Listener
 
-interface Integration : Listener {
+interface Integration {
     fun onEnable() {}
 
     fun onDisable() {}
@@ -14,4 +13,8 @@ interface Integration : Listener {
     fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {}
 
     fun isInitialized(): Boolean
+
+    val panoPluginMain: PanoPluginMain
+
+    fun String.colorize() = panoPluginMain.translateColor(this)
 }

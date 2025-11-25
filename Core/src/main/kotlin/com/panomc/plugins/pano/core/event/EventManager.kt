@@ -6,7 +6,7 @@ import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.platform.PlatformManager
 
 class EventManager(private val panoPluginMain: PanoPluginMain, platformManager: PlatformManager) {
-    val eventListeners = listOf(
+    val eventListeners = setOf(
         OnPlayerJoin(platformManager, panoPluginMain),
         OnPlayerDisconnect(platformManager, panoPluginMain)
     )

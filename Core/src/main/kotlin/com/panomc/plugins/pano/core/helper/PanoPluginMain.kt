@@ -1,5 +1,6 @@
 package com.panomc.plugins.pano.core.helper
 
+import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
@@ -12,6 +13,8 @@ interface PanoPluginMain {
     fun getDataFolder(): File
 
     fun getPanoLogger(): Logger
+
+    fun getPano(): Pano
 
     fun registerCommands(commands: List<Command>)
 
@@ -29,11 +32,13 @@ interface PanoPluginMain {
 
     fun translateColor(text: String): String
 
-    fun registerEventListeners(listeners: List<Listener>)
+    fun registerEventListeners(listeners: Set<Listener>)
 
-    fun unregisterEventListeners(listeners: List<Listener>)
+    fun unregisterEventListeners(listeners: Set<Listener>)
 
     fun onConnectionEstablished(webSocket: WebSocket?) {}
 
     fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {}
+
+    fun kickPlayer(player: String, message: String)
 }

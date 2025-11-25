@@ -13,6 +13,10 @@ class SpigotEventHelper(
         (commandSender as CommandSender).sendMessage(pluginMain.translateColor(message))
     }
 
+    override fun kick(commandSender: Any, message: String) {
+        (commandSender as Player).kickPlayer(pluginMain.translateColor(message))
+    }
+
     override fun convertToPlayerData(player: Any): EventHelper.Companion.PlayerData {
         val playerInstance = player as Player
 

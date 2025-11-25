@@ -6,6 +6,8 @@ import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.core.integration.BanIntegration
+import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.util.LegacyColorConverter
 import com.velocitypowered.api.command.CommandMeta
 import com.velocitypowered.api.event.Subscribe
@@ -15,6 +17,8 @@ import com.velocitypowered.api.event.proxy.ProxyShutdownEvent
 import com.velocitypowered.api.plugin.annotation.DataDirectory
 import com.velocitypowered.api.proxy.ProxyServer
 import com.velocitypowered.api.scheduler.ScheduledTask
+import io.vertx.core.http.WebSocket
+import net.kyori.adventure.text.Component
 import java.io.File
 import java.net.URLClassLoader
 import java.nio.file.Path
@@ -22,9 +26,19 @@ import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
 class VelocityMain : PanoPluginMain {
-    private lateinit var pano: Pano
+    private val mPano: Pano by lazy {
+        Pano.init(this)
+    }
+
     private val commands = mutableMapOf<VelocityCommand, CommandMeta>()
     private val scheduledTasks = mutableMapOf<() -> Unit, ScheduledTask>()
+    internal lateinit var velocityEventListener: VelocityEventListener
+
+    private val integrations by lazy {
+        listOf(
+            BanIntegration(this),
+        )
+    }
 
     @Inject
     private lateinit var server: ProxyServer
@@ -58,13 +72,13 @@ class VelocityMain : PanoPluginMain {
 
     override fun getPanoLogger(): Logger = logger
 
+    override fun getPano(): Pano = mPano
+
     private fun onEnable() {
-        pano = Pano.init(this)
+        integrations.forEach { it.onEnable() }
 
         val task: () -> Unit = {
-            if (::pano.isInitialized) {
-                pano.onServerStart()
-            }
+            mPano.onServerStart()
         }
 
         server.scheduler
@@ -73,9 +87,9 @@ class VelocityMain : PanoPluginMain {
     }
 
     private fun onDisable() {
-        if (::pano.isInitialized) {
-            pano.disable()
-        }
+        mPano.disable()
+
+        integrations.forEach { it.onDisable() }
     }
 
     override fun registerCommands(commands: List<Command>) {
@@ -133,11 +147,33 @@ class VelocityMain : PanoPluginMain {
 
     override fun translateColor(text: String): String = LegacyColorConverter.translate(text)
 
-    override fun registerEventListeners(listeners: List<Listener>) {
-        server.eventManager.register(this, VelocityEventListener(this, listeners))
+    override fun registerEventListeners(listeners: Set<Listener>) {
+        if (!::velocityEventListener.isInitialized) {
+            velocityEventListener = VelocityEventListener(this, listeners.toMutableSet())
+        }
+
+        velocityEventListener.listeners.addAll(listeners)
+
+        server.eventManager.register(this, velocityEventListener)
     }
 
-    override fun unregisterEventListeners(listeners: List<Listener>) {
+    override fun unregisterEventListeners(listeners: Set<Listener>) {
         server.eventManager.unregisterListeners(this)
+    }
+
+    override fun onConnectionEstablished(webSocket: WebSocket?) {
+        integrations.forEach { it.onConnectionEstablished(webSocket) }
+    }
+
+    override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
+        integrations.forEach { it.onServerSettingsChanged(serverSettings) }
+    }
+
+    override fun kickPlayer(player: String, message: String) {
+        val optionalPlayer = server.getPlayer(player)
+
+        if (optionalPlayer.isPresent) {
+            optionalPlayer.get().disconnect(Component.text(translateColor(message)))
+        }
     }
 }

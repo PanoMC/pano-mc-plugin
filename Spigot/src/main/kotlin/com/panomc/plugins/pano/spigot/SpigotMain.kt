@@ -5,13 +5,13 @@ import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.core.integration.BanIntegration
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.spigot.integration.AuthMeIntegration
 import io.vertx.core.http.WebSocket
 import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import org.bukkit.command.CommandMap
-import org.bukkit.event.HandlerList
 import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
 import java.net.URLClassLoader
@@ -19,22 +19,24 @@ import java.util.function.Consumer
 import java.util.logging.Logger
 
 class SpigotMain : JavaPlugin(), PanoPluginMain {
-    internal lateinit var pano: Pano
+    private val mPano by lazy {
+        Pano.init(this)
+    }
     private val commands = mutableListOf<SpigotCommand>()
     private val scheduledTasks = mutableMapOf<() -> Unit, Any>()
     private val serverData by lazy { SpigotServerData(this) }
     private val mPanoLogger by lazy { getPanoLogger() }
     internal val eventHelper by lazy { SpigotEventHelper(this) }
+    internal lateinit var spigotEventListener: SpigotEventListener
 
     private val integrations by lazy {
-        listOf<Integration>(
-            AuthMeIntegration(this)
+        listOf(
+            BanIntegration(this),
+            AuthMeIntegration(this),
         )
     }
 
     override fun onEnable() {
-        pano = Pano.init(this)
-
         if (SpigotServerUtil.isFolia()) {
             try {
                 val scheduler = server.javaClass.getMethod("getGlobalRegionScheduler").invoke(server)
@@ -61,15 +63,11 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     private fun onStart() {
         integrations.forEach { it.onEnable() }
 
-        if (::pano.isInitialized) {
-            pano.onServerStart()
-        }
+        mPano.onServerStart()
     }
 
     override fun onDisable() {
-        if (::pano.isInitialized) {
-            pano.disable()
-        }
+        mPano.disable()
 
         integrations.forEach { it.onDisable() }
     }
@@ -158,15 +156,23 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     override fun translateColor(text: String): String = ChatColor.translateAlternateColorCodes('&', text)
 
-    override fun registerEventListeners(listeners: List<Listener>) {
-        server.pluginManager.registerEvents(SpigotEventListener(eventHelper, listeners), this)
+    override fun registerEventListeners(listeners: Set<Listener>) {
+        if (!::spigotEventListener.isInitialized) {
+            spigotEventListener = SpigotEventListener(eventHelper, listeners.toMutableSet())
+        }
+
+        spigotEventListener.listeners.addAll(listeners)
+
+        server.pluginManager.registerEvents(spigotEventListener, this)
     }
 
-    override fun unregisterEventListeners(listeners: List<Listener>) {
-        HandlerList.unregisterAll(this)
+    override fun unregisterEventListeners(listeners: Set<Listener>) {
+        spigotEventListener.listeners.removeAll(listeners)
     }
 
     override fun getPanoLogger(): Logger = ColoredLogger("[Pano] ")
+
+    override fun getPano(): Pano = mPano
 
     override fun onConnectionEstablished(webSocket: WebSocket?) {
         integrations.forEach { it.onConnectionEstablished(webSocket) }
@@ -174,5 +180,11 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
         integrations.forEach { it.onServerSettingsChanged(serverSettings) }
+    }
+
+    override fun kickPlayer(player: String, message: String) {
+        server.scheduler.runTask(this, Runnable {
+            server.getPlayer(player)?.kickPlayer(message)
+        })
     }
 }

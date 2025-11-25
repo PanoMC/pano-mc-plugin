@@ -111,7 +111,7 @@ class I18nManager(
     fun translate(
         playerInfo: GetPlayerInfoMessage?,
         key: String,
-        variables: Map<String, Any> = emptyMap()
+        variables: Map<String, Any?> = emptyMap()
     ): String? {
         val translationTemplate = getTranslation(playerInfo, key) ?: return null
 
@@ -137,11 +137,11 @@ class I18nManager(
      * @return The rendered translation string or null if translation not found
      */
     fun translate(
-        locale: String,
+        locale: String?,
         key: String,
-        variables: Map<String, Any> = emptyMap()
+        variables: Map<String, Any?> = emptyMap()
     ): String? {
-        val translationTemplate = getTranslation(locale, key) ?: return null
+        val translationTemplate = getTranslation(locale ?: platformLocale, key) ?: return null
 
         // If no variables provided, return the translation as-is
         if (variables.isEmpty()) {

@@ -5,6 +5,9 @@ import com.panomc.plugins.pano.core.command.Command
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
+import com.panomc.plugins.pano.core.integration.BanIntegration
+import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
+import io.vertx.core.http.WebSocket
 import net.md_5.bungee.api.ChatColor
 import net.md_5.bungee.api.plugin.Plugin
 import net.md_5.bungee.api.scheduler.ScheduledTask
@@ -13,20 +16,29 @@ import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
 class BungeeMain : Plugin(), PanoPluginMain {
-    private lateinit var pano: Pano
+    private val mPano: Pano by lazy {
+        Pano.init(this)
+    }
     private val scheduledTasks = mutableMapOf<() -> Unit, ScheduledTask>()
     private val serverData by lazy { BungeeServerData(this) }
+    internal lateinit var bungeeEventListener: BungeeEventListener
+
+    private val integrations by lazy {
+        listOf(
+            BanIntegration(this),
+        )
+    }
 
     override fun onEnable() {
-        pano = Pano.init(this)
+        integrations.forEach { it.onEnable() }
 
-        pano.onServerStart()
+        mPano.onServerStart()
     }
 
     override fun onDisable() {
-        if (::pano.isInitialized) {
-            pano.disable()
-        }
+        mPano.disable()
+
+        integrations.forEach { it.onDisable() }
     }
 
     override fun registerCommands(commands: List<Command>) {
@@ -70,13 +82,33 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
     override fun translateColor(text: String): String = ChatColor.translateAlternateColorCodes('&', text)
 
-    override fun registerEventListeners(listeners: List<Listener>) {
-        proxy.pluginManager.registerListener(this, BungeeEventListener(this, listeners))
+    override fun registerEventListeners(listeners: Set<Listener>) {
+        if (!::bungeeEventListener.isInitialized) {
+            bungeeEventListener = BungeeEventListener(this, listeners.toMutableSet())
+        }
+
+        bungeeEventListener.listeners.addAll(listeners)
+
+        proxy.pluginManager.registerListener(this, BungeeEventListener(this, listeners.toMutableSet()))
     }
 
-    override fun unregisterEventListeners(listeners: List<Listener>) {
-        proxy.pluginManager.unregisterListeners(this)
+    override fun unregisterEventListeners(listeners: Set<Listener>) {
+        bungeeEventListener.listeners.removeAll(listeners)
     }
 
     override fun getPanoLogger(): Logger = logger
+
+    override fun getPano(): Pano = mPano
+
+    override fun onConnectionEstablished(webSocket: WebSocket?) {
+        integrations.forEach { it.onConnectionEstablished(webSocket) }
+    }
+
+    override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
+        integrations.forEach { it.onServerSettingsChanged(serverSettings) }
+    }
+
+    override fun kickPlayer(player: String, message: String) {
+        proxy.getPlayer(player)?.disconnect(message)
+    }
 }

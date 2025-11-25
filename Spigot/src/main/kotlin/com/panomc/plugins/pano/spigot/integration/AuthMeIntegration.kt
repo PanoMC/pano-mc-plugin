@@ -2,10 +2,10 @@ package com.panomc.plugins.pano.spigot.integration
 
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
+import com.panomc.plugins.pano.core.helper.Integration
 import com.panomc.plugins.pano.core.platform.message.response.*
 import com.panomc.plugins.pano.core.platform.request.*
 import com.panomc.plugins.pano.core.util.EmailUtil.maskEmail
-import com.panomc.plugins.pano.spigot.Integration
 import com.panomc.plugins.pano.spigot.SpigotMain
 import com.panomc.plugins.pano.spigot.SpigotServerUtil.getPlayerIp
 import fr.xephi.authme.api.v3.AuthMeApi
@@ -16,9 +16,6 @@ import fr.xephi.authme.events.RegisterEvent
 import fr.xephi.authme.security.crypts.EncryptionMethod
 import fr.xephi.authme.security.crypts.HashedPassword
 import io.vertx.core.http.WebSocket
-import io.vertx.kotlin.coroutines.dispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.bukkit.Bukkit
 import org.bukkit.configuration.file.FileConfiguration
@@ -26,6 +23,7 @@ import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
+import org.bukkit.event.Listener
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerQuitEvent
@@ -33,7 +31,7 @@ import org.bukkit.event.server.ServerCommandEvent
 import java.io.File
 import java.util.*
 
-class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
+class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, Listener {
 
     private data class ConfigSetting(
         val path: String,
@@ -75,7 +73,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         )
     )
     private val logger by lazy {
-        spigotMain.getPanoLogger()
+        panoPluginMain.getPanoLogger()
     }
 
     private val authMePlugin by lazy {
@@ -84,22 +82,26 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     private lateinit var authMeApi: AuthMeApi
 
+    private val pano by lazy {
+        panoPluginMain.getPano()
+    }
+
     private val platformManager by lazy {
-        spigotMain.pano.platformManager
+        pano.platformManager
     }
 
     private val eventManager by lazy {
-        spigotMain.pano.eventManager
+        pano.eventManager
     }
 
     private val i18nManager by lazy {
-        spigotMain.pano.i18nManager
+        pano.i18nManager
     }
 
     // when register command is called, saved here
     private val pendingRegisterPasswords = mutableMapOf<String, String>()
 
-    internal var initialized: Boolean = false
+    private var initialized: Boolean = false
 
     private fun start() {
         if (initialized) {
@@ -138,7 +140,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
 
         HandlerList.unregisterAll(this)
-        spigotMain.registerEventListeners(eventManager.eventListeners)
+        panoPluginMain.registerEventListeners(eventManager.eventListeners)
         reloadAuthMe()
 
         logger.info("&eAuthMe integration is disabled.".colorize())
@@ -167,8 +169,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
     override fun isInitialized(): Boolean = initialized
 
     private fun registerEvents() {
-        spigotMain.unregisterEventListeners(listOf())
-        spigotMain.server.pluginManager.registerEvents(this, spigotMain)
+        panoPluginMain.unregisterEventListeners(eventManager.eventListeners)
+        panoPluginMain.server.pluginManager.registerEvents(this, panoPluginMain)
 
         logger.info("&2Registered events for AuthMe.".colorize())
     }
@@ -199,7 +201,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     private fun saveBackup(backupValues: Map<String, Any?>) {
         try {
-            val dataFolder = spigotMain.dataFolder
+            val dataFolder = panoPluginMain.dataFolder
             val backupFile = File(dataFolder, "authme-backup.yml")
 
             val backupConfig = if (backupFile.exists()) {
@@ -224,7 +226,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     private fun reloadAuthMe() {
         try {
-            Bukkit.getScheduler().runTask(spigotMain, Runnable {
+            Bukkit.getScheduler().runTask(panoPluginMain, Runnable {
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "authme reload")
                 logger.info("AuthMe configuration reloaded".colorize())
             })
@@ -233,8 +235,6 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
             logger.warning("Please run '/authme reload' manually".colorize())
         }
     }
-
-    private fun String.colorize() = spigotMain.translateColor(this)
 
     private fun isConfigCompatible(): Boolean {
         val config = authMePlugin.config
@@ -246,7 +246,9 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onPlayerLogin(event: LoginEvent) {
-        eventManager.eventListeners.find { it is OnPlayerJoin }?.handle(spigotMain.eventHelper, event.player)
+        runBlocking {
+            eventManager.eventListeners.find { it is OnPlayerJoin }?.handle(panoPluginMain.eventHelper, event.player)
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -284,13 +286,17 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
 
     @EventHandler(priority = EventPriority.LOWEST)
     fun onPlayerLogout(event: LogoutEvent) {
-        eventManager.eventListeners.find { it is OnPlayerDisconnect }?.handle(spigotMain.eventHelper, event.player)
+        runBlocking {
+            eventManager.eventListeners.find { it is OnPlayerDisconnect }?.handle(panoPluginMain.eventHelper, event.player)
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
     fun onPlayerDisconnect(event: PlayerQuitEvent) {
         if (authMeApi.isAuthenticated(event.player)) {
-            eventManager.eventListeners.find { it is OnPlayerDisconnect }?.handle(spigotMain.eventHelper, event.player)
+            runBlocking {
+                eventManager.eventListeners.find { it is OnPlayerDisconnect }?.handle(panoPluginMain.eventHelper, event.player)
+            }
         }
 
         if (pendingRegisterPasswords[event.player.name.lowercase()] != null) {
@@ -298,7 +304,7 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         }
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.NORMAL)
     fun onPlayerJoin(event: AsyncPlayerPreLoginEvent) {
         runBlocking {
             val playerName = event.name

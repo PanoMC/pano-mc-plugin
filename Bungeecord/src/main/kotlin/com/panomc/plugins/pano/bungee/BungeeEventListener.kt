@@ -4,6 +4,7 @@ import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
+import kotlinx.coroutines.runBlocking
 import net.md_5.bungee.api.CommandSender
 import net.md_5.bungee.api.chat.TextComponent
 import net.md_5.bungee.api.connection.ProxiedPlayer
@@ -15,11 +16,15 @@ import net.md_5.bungee.event.EventHandler
 
 class BungeeEventListener(
     private val pluginMain: PanoPluginMain,
-    private val listeners: List<com.panomc.plugins.pano.core.event.Listener>
+    internal val listeners: MutableSet<com.panomc.plugins.pano.core.event.Listener>
 ) : Listener, EventHelper {
 
     override fun sendMessage(commandSender: Any, message: String) {
         (commandSender as CommandSender).sendMessage(TextComponent(pluginMain.translateColor(message)))
+    }
+
+    override fun kick(commandSender: Any, message: String) {
+        (commandSender as ProxiedPlayer).disconnect(TextComponent(pluginMain.translateColor(message)))
     }
 
     override fun convertToPlayerData(player: Any): EventHelper.Companion.PlayerData {
@@ -34,11 +39,15 @@ class BungeeEventListener(
 
     @EventHandler
     fun onPostLogin(event: PostLoginEvent) {
-        listeners.find { it is OnPlayerJoin }?.handle(this, event.player)
+        runBlocking {
+            listeners.find { it is OnPlayerJoin }?.handle(this@BungeeEventListener, event.player)
+        }
     }
 
     @EventHandler
     fun onPlayerDisconnect(event: PlayerDisconnectEvent) {
-        listeners.find { it is OnPlayerDisconnect }?.handle(this, event.player)
+        runBlocking {
+            listeners.find { it is OnPlayerDisconnect }?.handle(this@BungeeEventListener, event.player)
+        }
     }
 }
