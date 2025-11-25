@@ -12,4 +12,6 @@ interface Integration : Listener {
     fun onConnectionEstablished(webSocket: WebSocket?) {}
 
     fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {}
+
+    fun isInitialized(): Boolean
 }

@@ -164,6 +164,8 @@ class AuthMeIntegration(private val spigotMain: SpigotMain) : Integration {
         stop()
     }
 
+    override fun isInitialized(): Boolean = initialized
+
     private fun registerEvents() {
         spigotMain.unregisterEventListeners(listOf())
         spigotMain.server.pluginManager.registerEvents(this, spigotMain)
