@@ -6,6 +6,7 @@ import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.integration.BanIntegration
+import com.panomc.plugins.pano.core.integration.PermissionIntegration
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.spigot.integration.AuthMeIntegration
 import io.vertx.core.http.WebSocket
@@ -31,6 +32,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     private val integrations by lazy {
         listOf(
+            PermissionIntegration(this),
             BanIntegration(this),
             AuthMeIntegration(this),
         )
@@ -180,6 +182,10 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
         integrations.forEach { it.onServerSettingsChanged(serverSettings) }
+    }
+
+    override fun onPermissionsSnapshotUpdated(message: com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage) {
+        integrations.forEach { it.onPermissionsSnapshotUpdated(message) }
     }
 
     override fun kickPlayer(player: String, message: String) {

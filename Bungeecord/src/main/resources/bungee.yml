@@ -4,6 +4,8 @@ version: ${version}
 author: Pano MC
 description: An advanced web platform for Minecraft servers.
 website: http://panomc.com
+softDepends:
+  - LuckPerms
 commands:
   pano:
     description: Runs Pano commands.

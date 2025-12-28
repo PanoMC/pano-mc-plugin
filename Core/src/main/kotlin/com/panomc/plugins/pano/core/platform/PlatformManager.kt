@@ -11,6 +11,7 @@ import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
 import com.panomc.plugins.pano.core.platform.message.handler.BanPlayerHandler
 import com.panomc.plugins.pano.core.platform.message.handler.GetServerSettingsHandler
+import com.panomc.plugins.pano.core.platform.message.handler.PermissionsSnapshotUpdatedHandler
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.request.GetServerSettingsRequest
 import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
@@ -57,7 +58,8 @@ class PlatformManager(
 
     internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>(
         GetServerSettingsHandler(this, pluginMain),
-        BanPlayerHandler(this, pluginMain)
+        BanPlayerHandler(this, pluginMain),
+        PermissionsSnapshotUpdatedHandler(pluginMain)
     )
 
     val connectPlatformTask: (delay: Boolean, async: Boolean) -> Unit by lazy {

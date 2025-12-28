@@ -7,5 +7,8 @@
   "authors": [
     "Pano"
   ],
-  "url": "https://panomc.com"
+  "url": "https://panomc.com",
+  "dependencies": [
+    { "id": "luckperms", "optional": true }
+  ]
 }

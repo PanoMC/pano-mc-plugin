@@ -12,6 +12,8 @@ interface Integration {
 
     fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {}
 
+    fun onPermissionsSnapshotUpdated(message: com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage) {}
+
     fun isInitialized(): Boolean
 
     val panoPluginMain: PanoPluginMain

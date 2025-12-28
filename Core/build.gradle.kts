@@ -37,6 +37,9 @@ dependencies {
 
     // Handlebars for template rendering in translations
     api("com.github.jknack:handlebars:4.3.1")
+
+    // LuckPerms API must NOT be shaded into our jar. LuckPerms provides it at runtime.
+    compileOnly("net.luckperms:api:5.5")
 }
 
 kotlin {

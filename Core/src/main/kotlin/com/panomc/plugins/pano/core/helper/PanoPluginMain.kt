@@ -40,5 +40,7 @@ interface PanoPluginMain {
 
     fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {}
 
+    fun onPermissionsSnapshotUpdated(message: com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage) {}
+
     fun kickPlayer(player: String, message: String)
 }

@@ -6,7 +6,9 @@ import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.integration.BanIntegration
+import com.panomc.plugins.pano.core.integration.PermissionIntegration
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
+import com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage
 import io.vertx.core.http.WebSocket
 import net.md_5.bungee.api.ChatColor
 import net.md_5.bungee.api.plugin.Plugin
@@ -25,6 +27,7 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
     private val integrations by lazy {
         listOf(
+            PermissionIntegration(this),
             BanIntegration(this),
         )
     }
@@ -106,6 +109,10 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
         integrations.forEach { it.onServerSettingsChanged(serverSettings) }
+    }
+
+    override fun onPermissionsSnapshotUpdated(message: PermissionsSnapshotUpdatedMessage) {
+        integrations.forEach { it.onPermissionsSnapshotUpdated(message) }
     }
 
     override fun kickPlayer(player: String, message: String) {
