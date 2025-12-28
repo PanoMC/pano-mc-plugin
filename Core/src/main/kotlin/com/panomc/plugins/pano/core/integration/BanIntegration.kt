@@ -110,7 +110,7 @@ class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration 
     }
 
     override fun onConnectionEstablished(webSocket: WebSocket?) {
-        if (platformManager.serverSettings.authIntegration) {
+        if (platformManager.serverSettings.banIntegration) {
             start()
             return
         }
