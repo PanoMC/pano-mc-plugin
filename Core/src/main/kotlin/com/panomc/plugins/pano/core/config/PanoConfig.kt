@@ -20,6 +20,7 @@ data class PanoConfig(
         data class PlatformConfig(
             var host: String = "",
             var port: Int = 8080,
+            var ssl: Boolean = false,
             var token: String = "",
             @SerializedName("encryption-key") var encryptionKey: String = ""
         )

@@ -26,6 +26,7 @@ import io.vertx.ext.web.client.WebClient
 import io.vertx.kotlin.coroutines.coAwait
 import io.vertx.kotlin.coroutines.dispatcher
 import kotlinx.coroutines.*
+import java.net.URI
 import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
 import java.util.*
@@ -143,15 +144,24 @@ class PlatformManager(
     suspend fun connectNewPlatform(platformAddress: String, platformCode: String) {
         val pingData = minecraftStatusClient.query(host = serverData.hostAddress(), port = serverData.port())
 
-        var port = 8088
-        var host = platformAddress
+        val configsToTry = mutableListOf<Triple<String, Int, Boolean>>()
 
-        if (host.contains(":")) {
-            val splitHost = host.split(":")
-
-            host = splitHost[0]
-
-            port = splitHost[1].toInt()
+        if (platformAddress.startsWith("http://") || platformAddress.startsWith("https://")) {
+            val uri = URI(platformAddress)
+            val h = uri.host ?: platformAddress
+            val s = uri.scheme == "https"
+            val p = if (uri.port != -1) uri.port else (if (s) 443 else 80)
+            configsToTry.add(Triple(h, p, s))
+        } else if (platformAddress.contains(":")) {
+            val splitHost = platformAddress.split(":")
+            val h = splitHost[0]
+            val p = splitHost[1].toIntOrNull() ?: 8088
+            configsToTry.add(Triple(h, p, true))
+            configsToTry.add(Triple(h, p, false))
+        } else {
+            configsToTry.add(Triple(platformAddress, 443, true))
+            configsToTry.add(Triple(platformAddress, 80, false))
+            configsToTry.add(Triple(platformAddress, 8088, false))
         }
 
         val requestBody = JsonObject()
@@ -181,21 +191,42 @@ class PlatformManager(
                 .put("motd", pingData.descriptionJson)
         }
 
-        val request = webClient
-            .post(port, host, "/api/server/connect")
-            .sendJsonObject(requestBody)
+        var finalResponse: HttpResponse<*>? = null
+        var finalHost = ""
+        var finalPort = 0
+        var finalSsl = false
+        var lastException: Exception? = null
 
-        val response: HttpResponse<*>
+        for ((h, p, s) in configsToTry) {
+            try {
+                val response = webClient
+                    .post(p, h, "/api/server/connect")
+                    .ssl(s)
+                    .timeout(5000)
+                    .sendJsonObject(requestBody)
+                    .coAwait()
 
-        try {
-            response = request.coAwait()
-        } catch (exception: Exception) {
-            exception.printStackTrace()
-
-            throw PanoError("&cCouldn't connect to Pano Platform. Check your information. Checkout console for more detail.")
+                if (response.statusCode() == 200) {
+                    val body = response.bodyAsJsonObject()
+                    if (body != null && (body.containsKey("result") || body.containsKey("token"))) {
+                        finalResponse = response
+                        finalHost = h
+                        finalPort = p
+                        finalSsl = s
+                        break
+                    }
+                }
+            } catch (exception: Exception) {
+                lastException = exception
+            }
         }
 
-        val body = response.bodyAsJsonObject()
+        if (finalResponse == null) {
+            lastException?.printStackTrace()
+            throw PanoError("&cCouldn't connect to Pano Platform. Checked all possible configurations. Checkout console for more detail.")
+        }
+
+        val body = finalResponse.bodyAsJsonObject()
 
         if (body != null && body.getString("result") == "error") {
             val error = body.getString("error")
@@ -211,7 +242,7 @@ class PlatformManager(
         val decodedEncryptionKey = Base64.getDecoder().decode(body.getString("encryptionKey"))
         val encryptionKey = EncryptUtil.decryptData(decodedEncryptionKey, privateKey)
 
-        savePlatform(host, port, token, encryptionKey)
+        savePlatform(finalHost, finalPort, finalSsl, token, encryptionKey)
         canConnect = true
     }
 
@@ -226,6 +257,7 @@ class PlatformManager(
 
         val request = webClient
             .post(port, host, "/api/server/disconnect")
+            .ssl(platformConfig.ssl)
             .putHeader("Authorization", "Bearer $token")
             .send()
 
@@ -250,6 +282,7 @@ class PlatformManager(
 
         webSocketConnectOptions.host = host
         webSocketConnectOptions.port = port
+        webSocketConnectOptions.isSsl = platformConfig.ssl
         webSocketConnectOptions.uri = "/api/server/connection"
         webSocketConnectOptions.method = HttpMethod.GET
 
@@ -380,7 +413,7 @@ class PlatformManager(
         webSocket?.close()?.coAwait()
     }
 
-    private fun savePlatform(host: String, port: Int, token: String, encryptionKey: String) {
+    private fun savePlatform(host: String, port: Int, ssl: Boolean, token: String, encryptionKey: String) {
         if (configManager.config.platform == null) {
             configManager.config.platform = PanoConfig.Companion.PlatformConfig()
         }
@@ -389,6 +422,7 @@ class PlatformManager(
 
         platformConfig.host = host
         platformConfig.port = port
+        platformConfig.ssl = ssl
         platformConfig.token = token
         platformConfig.encryptionKey = encryptionKey
 
@@ -403,7 +437,8 @@ class PlatformManager(
         val platformConfig = configManager.config.platform!!
 
         platformConfig.host = ""
-        platformConfig.port = 8080
+        platformConfig.port = 80
+        platformConfig.ssl = false
         platformConfig.token = ""
         platformConfig.encryptionKey = ""
 
