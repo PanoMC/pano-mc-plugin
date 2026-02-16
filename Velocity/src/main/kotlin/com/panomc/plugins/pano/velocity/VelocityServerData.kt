@@ -3,13 +3,17 @@ package com.panomc.plugins.pano.velocity
 import com.panomc.plugins.pano.core.ServerType
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.velocitypowered.api.proxy.ProxyServer
+import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
+import java.awt.image.BufferedImage
+import java.io.File
+import javax.imageio.ImageIO
 
 class VelocityServerData(private val server: ProxyServer) : ServerData {
     override fun serverName(): String = "Velocity"
 
     override fun hostAddress(): String = server.boundAddress.hostString
 
-    override fun motd(): String? = null
+    override fun motd(): String = GsonComponentSerializer.gson().serialize(server.configuration.motd)
 
     override fun port(): Int = server.boundAddress.port
 
@@ -20,4 +24,15 @@ class VelocityServerData(private val server: ProxyServer) : ServerData {
     override fun playerCount(): Int = server.playerCount
 
     override fun maxPlayerCount(): Int = server.configuration.showMaxPlayers
+
+    override fun favicon(): BufferedImage? {
+        val iconFile = File("server-icon.png")
+        return if (iconFile.exists()) {
+            try {
+                ImageIO.read(iconFile)
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+    }
 }

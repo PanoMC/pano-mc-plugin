@@ -6,6 +6,7 @@ import com.panomc.plugins.pano.core.config.PanoConfig
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.i18n.I18nManager
+import com.panomc.plugins.pano.core.mcping.McStatus
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
@@ -141,8 +142,16 @@ class PlatformManager(
 
     fun getWebSocket() = webSocket
 
+    private suspend fun queryServerStatus(): McStatus {
+        return try {
+            minecraftStatusClient.query(host = serverData.connectableHostAddress(), port = serverData.port())
+        } catch (e: Exception) {
+            McStatus(null, null, null, null, null, null, null, null)
+        }
+    }
+
     suspend fun connectNewPlatform(platformAddress: String, platformCode: String) {
-        val pingData = minecraftStatusClient.query(host = serverData.hostAddress(), port = serverData.port())
+        val pingData = queryServerStatus()
 
         val configsToTry = mutableListOf<Triple<String, Int, Boolean>>()
 
@@ -178,17 +187,21 @@ class PlatformManager(
             .put("startTime", Pano.serverStartTime)
             .put("publicKey", configManager.config.publicKey)
 
-        if (pingData.faviconImage != null) {
+        val faviconImage = pingData.faviconImage ?: serverData.favicon()
+
+        if (faviconImage != null) {
             requestBody
                 .put(
                     "favicon",
-                    ImageUtil.bufferedImageToDataUrl(pingData.faviconImage)
+                    ImageUtil.bufferedImageToDataUrl(faviconImage)
                 )
         }
 
-        if (pingData.descriptionJson != null) {
+        val motd = serverData.motd()
+
+        if (motd != null) {
             requestBody
-                .put("motd", pingData.descriptionJson)
+                .put("motd", motd)
         }
 
         var finalResponse: HttpResponse<*>? = null
@@ -338,7 +351,7 @@ class PlatformManager(
     }
 
     private suspend fun onConnectionEstablished() {
-        val pingData = minecraftStatusClient.query(host = serverData.hostAddress(), port = serverData.port())
+        val pingData = queryServerStatus()
 
         val eventRequest = OnServerConnectRequest(
             serverData.serverName(),
@@ -349,8 +362,8 @@ class PlatformManager(
             serverData.hostAddress(),
             serverData.port(),
             Pano.serverStartTime,
-            if (pingData.faviconImage != null) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage) else null,
-            pingData.descriptionJson
+            if (pingData.faviconImage != null || serverData.favicon() != null) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage ?: serverData.favicon()!!) else null,
+            serverData.motd()
         )
 
         sendMessage(eventRequest)

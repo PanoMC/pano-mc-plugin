@@ -4,13 +4,16 @@ import com.panomc.plugins.pano.core.ServerType
 import com.panomc.plugins.pano.core.helper.ServerData
 import net.md_5.bungee.api.config.ListenerInfo
 import net.md_5.bungee.api.plugin.Plugin
+import java.awt.image.BufferedImage
+import java.io.File
+import javax.imageio.ImageIO
 
 class BungeeServerData(private val plugin: Plugin) : ServerData {
     override fun serverName(): String = plugin.proxy.name
 
     override fun hostAddress(): String = (plugin.proxy.config.listeners.toList()[0] as ListenerInfo).host.hostString
 
-    override fun motd(): String? = null
+    override fun motd(): String = (plugin.proxy.config.listeners.toList()[0] as ListenerInfo).motd
 
     override fun port(): Int = (plugin.proxy.config.listeners.toList()[0] as ListenerInfo).host.port
 
@@ -21,4 +24,15 @@ class BungeeServerData(private val plugin: Plugin) : ServerData {
     override fun playerCount(): Int = plugin.proxy.players.size
 
     override fun maxPlayerCount(): Int = plugin.proxy.config.playerLimit
+
+    override fun favicon(): BufferedImage? {
+        val iconFile = File(plugin.dataFolder.parentFile.parentFile, "server-icon.png")
+        return if (iconFile.exists()) {
+            try {
+                ImageIO.read(iconFile)
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+    }
 }
