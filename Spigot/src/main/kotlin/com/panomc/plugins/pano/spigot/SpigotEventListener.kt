@@ -2,10 +2,12 @@ package com.panomc.plugins.pano.spigot
 
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import kotlinx.coroutines.runBlocking
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
 
@@ -15,16 +17,23 @@ class SpigotEventListener(
 ) : Listener {
 
     @EventHandler
+    fun onPlayerPreLogin(event: AsyncPlayerPreLoginEvent) {
+        runBlocking {
+            listeners.filterIsInstance<OnPlayerPreLogin>().forEach { it.handle(eventHelper, event, event.name) }
+        }
+    }
+
+    @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
         runBlocking {
-            listeners.find { it is OnPlayerJoin }?.handle(eventHelper, event.player)
+            listeners.filterIsInstance<OnPlayerJoin>().forEach { it.handle(eventHelper, event.player) }
         }
     }
 
     @EventHandler
     fun onPlayerDisconnect(event: PlayerQuitEvent) {
         runBlocking {
-            listeners.find { it is OnPlayerDisconnect }?.handle(eventHelper, event.player)
+            listeners.filterIsInstance<OnPlayerDisconnect>().forEach { it.handle(eventHelper, event.player) }
         }
     }
 }

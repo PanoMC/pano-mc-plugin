@@ -49,8 +49,8 @@ open class SpringConfig {
     @Bean
     @Lazy
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
-    open fun commandManager(platformManager: PlatformManager, scheduleManager: ScheduleManager) =
-        CommandManager(panoPluginMain.getPanoLogger(), panoPluginMain, platformManager)
+    open fun commandManager(platformManager: PlatformManager, i18nManager: I18nManager) =
+        CommandManager(panoPluginMain.getPanoLogger(), panoPluginMain, platformManager, i18nManager)
 
     @Bean
     @Lazy

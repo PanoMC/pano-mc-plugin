@@ -159,11 +159,12 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     override fun translateColor(text: String): String = ChatColor.translateAlternateColorCodes('&', text)
 
     override fun registerEventListeners(listeners: Set<Listener>) {
-        if (!::spigotEventListener.isInitialized) {
-            spigotEventListener = SpigotEventListener(eventHelper, listeners.toMutableSet())
+        if (::spigotEventListener.isInitialized) {
+            spigotEventListener.listeners.addAll(listeners)
+            return
         }
 
-        spigotEventListener.listeners.addAll(listeners)
+        spigotEventListener = SpigotEventListener(eventHelper, listeners.toMutableSet())
 
         server.pluginManager.registerEvents(spigotEventListener, this)
     }

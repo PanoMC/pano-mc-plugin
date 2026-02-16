@@ -7,6 +7,8 @@ interface EventHelper {
 
     fun kick(commandSender: Any, message: String)
 
+    fun disallow(event: Any, message: String)
+
     fun convertToPlayerData(player: Any): PlayerData
 
     companion object {
@@ -14,7 +16,8 @@ interface EventHelper {
             val uuid: UUID,
             val username: String,
             val ping: Long,
-            val loginTime: Long = System.currentTimeMillis()
+            val loginTime: Long = System.currentTimeMillis(),
+            val ipAddress: String
         )
     }
 }

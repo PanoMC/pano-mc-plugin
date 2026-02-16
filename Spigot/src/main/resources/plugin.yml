@@ -11,6 +11,9 @@ folia-supported: true
 #    description: Runs Pano commands.
 #    permission: pano.admin
 #    permission-message: You do not have permission!
+#  link:
+#    description: Link your account with website.
+#    default: true
 permissions:
   pano.admin:
     description: Allows Pano command.

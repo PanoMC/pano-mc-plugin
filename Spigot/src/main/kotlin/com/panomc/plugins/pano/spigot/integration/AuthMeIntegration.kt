@@ -247,7 +247,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onPlayerLogin(event: LoginEvent) {
         runBlocking {
-            eventManager.eventListeners.find { it is OnPlayerJoin }?.handle(panoPluginMain.eventHelper, event.player)
+            eventManager.eventListeners.filterIsInstance<OnPlayerJoin>().forEach { it.handle(panoPluginMain.eventHelper, event.player) }
         }
     }
 
@@ -287,7 +287,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
     @EventHandler(priority = EventPriority.LOWEST)
     fun onPlayerLogout(event: LogoutEvent) {
         runBlocking {
-            eventManager.eventListeners.find { it is OnPlayerDisconnect }?.handle(panoPluginMain.eventHelper, event.player)
+            eventManager.eventListeners.filterIsInstance<OnPlayerDisconnect>().forEach { it.handle(panoPluginMain.eventHelper, event.player) }
         }
     }
 
@@ -295,7 +295,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
     fun onPlayerDisconnect(event: PlayerQuitEvent) {
         if (authMeApi.isAuthenticated(event.player)) {
             runBlocking {
-                eventManager.eventListeners.find { it is OnPlayerDisconnect }?.handle(panoPluginMain.eventHelper, event.player)
+                eventManager.eventListeners.filterIsInstance<OnPlayerDisconnect>().forEach { it.handle(panoPluginMain.eventHelper, event.player) }
             }
         }
 

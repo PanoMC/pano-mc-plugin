@@ -1,17 +1,21 @@
 package com.panomc.plugins.pano.core.command
 
+import com.panomc.plugins.pano.core.command.commands.LinkCommand
 import com.panomc.plugins.pano.core.command.commands.PanoCommand
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
+import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.platform.PlatformManager
 import java.util.logging.Logger
 
 class CommandManager(
     private val logger: Logger,
     private val panoPluginMain: PanoPluginMain,
-    platformManager: PlatformManager
+    platformManager: PlatformManager,
+    i18nManager: I18nManager
 ) {
     private val commands = listOf<Command>(
-        PanoCommand(platformManager)
+        PanoCommand(platformManager),
+        LinkCommand(platformManager, i18nManager)
     )
 
     fun init() {

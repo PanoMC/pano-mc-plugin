@@ -1,6 +1,6 @@
 package com.panomc.plugins.pano.core.integration
 
-import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.Integration
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
@@ -32,11 +32,10 @@ class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration 
 
     private val eventListeners by lazy {
         setOf(
-            object : OnPlayerJoin(platformManager, panoPluginMain) {
+            object : OnPlayerPreLogin() {
                 override suspend fun handle(eventHelper: EventHelper, vararg args: Any) {
-                    val player = args[0]
-                    val playerData = eventHelper.convertToPlayerData(player)
-                    val username = playerData.username
+                    val event = args[0]
+                    val username = args[1] as String
 
                     val playerInfo = platformManager.sendMessageAwaitResponse<GetPlayerInfoMessage>(
                         GetPlayerInfoRequest(username),
@@ -63,7 +62,7 @@ class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration 
 
                     val message = i18nManager.translate(playerInfo, key, mapOf("reason" to playerInfo.banReason, "untilTime" to formattedBannedUntil))!!
 
-                    eventHelper.kick(player, message)
+                    eventHelper.disallow(event, message)
                 }
             }
         )

@@ -86,11 +86,12 @@ class BungeeMain : Plugin(), PanoPluginMain {
     override fun translateColor(text: String): String = ChatColor.translateAlternateColorCodes('&', text)
 
     override fun registerEventListeners(listeners: Set<Listener>) {
-        if (!::bungeeEventListener.isInitialized) {
-            bungeeEventListener = BungeeEventListener(this, listeners.toMutableSet())
+        if (::bungeeEventListener.isInitialized) {
+            bungeeEventListener.listeners.addAll(listeners)
+            return
         }
 
-        bungeeEventListener.listeners.addAll(listeners)
+        bungeeEventListener = BungeeEventListener(this, listeners.toMutableSet())
 
         proxy.pluginManager.registerListener(this, BungeeEventListener(this, listeners.toMutableSet()))
     }

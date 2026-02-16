@@ -151,11 +151,13 @@ class VelocityMain : PanoPluginMain {
     override fun translateColor(text: String): String = LegacyColorConverter.translate(text)
 
     override fun registerEventListeners(listeners: Set<Listener>) {
-        if (!::velocityEventListener.isInitialized) {
-            velocityEventListener = VelocityEventListener(this, listeners.toMutableSet())
+        if (::velocityEventListener.isInitialized) {
+            velocityEventListener.listeners.addAll(listeners)
+
+            return
         }
 
-        velocityEventListener.listeners.addAll(listeners)
+        velocityEventListener = VelocityEventListener(this, listeners.toMutableSet())
 
         server.eventManager.register(this, velocityEventListener)
     }

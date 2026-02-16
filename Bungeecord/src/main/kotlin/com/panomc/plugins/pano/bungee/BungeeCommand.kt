@@ -6,6 +6,7 @@ import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import kotlinx.coroutines.runBlocking
 import net.md_5.bungee.api.CommandSender
 import net.md_5.bungee.api.chat.TextComponent
+import net.md_5.bungee.api.connection.ProxiedPlayer
 
 class BungeeCommand(private val command: Command, private val pluginMain: PanoPluginMain) :
     net.md_5.bungee.api.plugin.Command(command.name, command.permission), CommandHelper {
@@ -17,5 +18,13 @@ class BungeeCommand(private val command: Command, private val pluginMain: PanoPl
 
     override fun sendMessage(commandSender: Any, message: String) {
         (commandSender as CommandSender).sendMessage(TextComponent(pluginMain.translateColor(message)))
+    }
+
+    override fun isPlayer(commandSender: Any): Boolean {
+        return commandSender is ProxiedPlayer
+    }
+
+    override fun getUsername(commandSender: Any): String {
+        return (commandSender as ProxiedPlayer).name
     }
 }
