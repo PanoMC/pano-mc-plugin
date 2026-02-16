@@ -48,7 +48,7 @@ class BungeeEventListener(
     }
 
     @EventHandler
-    fun onPostLogin(event: PreLoginEvent) {
+    fun onPreLogin(event: PreLoginEvent) {
         runBlocking {
             listeners.filterIsInstance<OnPlayerPreLogin>().forEach { it.handle(this@BungeeEventListener, event, event.connection.name) }
         }

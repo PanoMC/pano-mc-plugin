@@ -93,7 +93,7 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
         bungeeEventListener = BungeeEventListener(this, listeners.toMutableSet())
 
-        proxy.pluginManager.registerListener(this, BungeeEventListener(this, listeners.toMutableSet()))
+        proxy.pluginManager.registerListener(this, bungeeEventListener)
     }
 
     override fun unregisterEventListeners(listeners: Set<Listener>) {
