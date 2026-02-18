@@ -2,11 +2,13 @@
   "branches": [
     {
       "name": "alpha",
-      "prerelease": true
+      "prerelease": "alpha",
+      "channel": "alpha"
     },
     {
       "name": "beta",
-      "prerelease": true
+      "prerelease": "beta",
+      "channel": "beta"
     },
     "main"
   ],
