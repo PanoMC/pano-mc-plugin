@@ -48,7 +48,7 @@ object FabricTextHelper {
         var i = 0
 
         while (i < message.length) {
-            if (message[i] == '&' && i + 1 < message.length) {
+            if ((message[i] == '&' || message[i] == '§') && i + 1 < message.length) {
                 val code = message[i + 1].lowercaseChar()
                 val formatting = COLOR_MAP[code]
 

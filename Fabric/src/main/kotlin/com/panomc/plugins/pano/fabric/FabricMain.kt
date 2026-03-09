@@ -9,7 +9,6 @@ import com.panomc.plugins.pano.core.integration.BanIntegration
 import com.panomc.plugins.pano.core.integration.PermissionIntegration
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage
-import com.panomc.plugins.pano.core.util.LegacyColorConverter
 import io.vertx.core.http.WebSocket
 import net.fabricmc.api.DedicatedServerModInitializer
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
@@ -182,7 +181,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         }
     }
 
-    override fun translateColor(text: String): String = LegacyColorConverter.translate(text)
+    override fun translateColor(text: String): String = text.replace('&', '§')
 
     override fun registerEventListeners(listeners: Set<Listener>) {
         if (!::fabricEventListener.isInitialized) {
