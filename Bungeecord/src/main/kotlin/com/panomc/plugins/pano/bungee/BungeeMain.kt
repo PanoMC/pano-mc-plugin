@@ -13,7 +13,7 @@ import io.vertx.core.http.WebSocket
 import net.md_5.bungee.api.ChatColor
 import net.md_5.bungee.api.plugin.Plugin
 import net.md_5.bungee.api.scheduler.ScheduledTask
-import java.net.URLClassLoader
+
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
@@ -81,7 +81,7 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
     override fun getServerData(): ServerData = serverData
 
-    override fun getPluginClassLoader(): URLClassLoader = javaClass.classLoader as URLClassLoader
+    override fun getPluginClassLoader(): java.net.URLClassLoader = javaClass.classLoader as java.net.URLClassLoader
 
     override fun translateColor(text: String): String = ChatColor.translateAlternateColorCodes('&', text)
 

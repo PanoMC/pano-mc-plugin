@@ -16,6 +16,7 @@ class OnPlayerDisconnect(private val platformManager: PlatformManager, private v
         var playerCount = pluginMain.getServerData().playerCount()
 
         if (pluginMain.getServerData().serverType() in listOf(
+                ServerType.FABRIC,
                 ServerType.FOLIA,
                 ServerType.PAPER,
                 ServerType.SPIGOT,

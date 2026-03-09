@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "pano",
+  "version": "${version}",
+  "name": "Pano",
+  "description": "An advanced web platform for Minecraft servers.",
+  "authors": [
+    "Pano"
+  ],
+  "contact": {
+    "homepage": "https://panomc.com",
+    "sources": "https://github.com/panocms/pano-mc-plugin"
+  },
+  "license": "MIT",
+  "environment": "server",
+  "entrypoints": {
+    "server": [
+      "com.panomc.plugins.pano.fabric.FabricMain"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": ">=1.20.1",
+    "java": ">=21"
+  },
+  "suggests": {
+    "luckperms": "*"
+  }
+}

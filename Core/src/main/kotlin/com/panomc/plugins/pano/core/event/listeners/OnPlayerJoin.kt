@@ -1,5 +1,6 @@
 package com.panomc.plugins.pano.core.event.listeners
 
+import com.panomc.plugins.pano.core.ServerType
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
@@ -11,7 +12,22 @@ open class OnPlayerJoin(private val platformManager: PlatformManager, private va
         val player = args[0]
         val playerData = eventHelper.convertToPlayerData(player)
 
-        val eventRequest = OnPlayerJoinRequest(playerData, pluginMain.getServerData().playerCount())
+        var playerCount = pluginMain.getServerData().playerCount()
+
+        // On these platforms, the JOIN event fires before the player is fully added to the list
+        if (pluginMain.getServerData().serverType() in listOf(
+                ServerType.FABRIC,
+                ServerType.FOLIA,
+                ServerType.PAPER,
+                ServerType.SPIGOT,
+                ServerType.BUKKIT,
+                ServerType.BUNGEECORD,
+            )
+        ) {
+            playerCount += 1
+        }
+
+        val eventRequest = OnPlayerJoinRequest(playerData, playerCount)
 
         platformManager.sendMessage(eventRequest)
     }

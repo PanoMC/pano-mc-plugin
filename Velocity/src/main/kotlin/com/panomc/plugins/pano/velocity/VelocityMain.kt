@@ -22,7 +22,7 @@ import com.velocitypowered.api.scheduler.ScheduledTask
 import io.vertx.core.http.WebSocket
 import net.kyori.adventure.text.Component
 import java.io.File
-import java.net.URLClassLoader
+
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
@@ -146,7 +146,8 @@ class VelocityMain : PanoPluginMain {
 
     override fun getServerData(): ServerData = serverData
 
-    override fun getPluginClassLoader(): URLClassLoader = VelocityMain::class.java.classLoader as URLClassLoader
+    override fun getPluginClassLoader(): java.net.URLClassLoader =
+        VelocityMain::class.java.classLoader as java.net.URLClassLoader
 
     override fun translateColor(text: String): String = LegacyColorConverter.translate(text)
 

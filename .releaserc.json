@@ -36,6 +36,10 @@
             "label": false
           },
           {
+            "path": "Fabric/build/libs/*.jar",
+            "label": false
+          },
+          {
             "path": "LICENSE",
             "label": false
           }
