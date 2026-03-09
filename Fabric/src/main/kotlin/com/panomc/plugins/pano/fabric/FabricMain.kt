@@ -35,6 +35,10 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
 
     internal lateinit var fabricEventListener: FabricEventListener
 
+    internal fun getFabricEventListenerOrNull(): FabricEventListener? {
+        return if (::fabricEventListener.isInitialized) fabricEventListener else null
+    }
+
     private var server: MinecraftServer? = null
     private val serverData by lazy { FabricServerData(server!!) }
 
@@ -52,6 +56,8 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         ServerLifecycleEvents.SERVER_STARTED.register { server ->
             this.server = server
 
+            FabricPreLoginHandler.fabricMain = this
+
             integrations.forEach { it.onEnable() }
 
             mPano.onServerStart()
@@ -66,6 +72,8 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         }
 
         // Register player join/disconnect events via Fabric API
+        // Pre-login checks (ban) are handled via PlayerManagerMixin -> FabricPreLoginHandler
+
         ServerPlayConnectionEvents.JOIN.register { handler, _, _ ->
             if (::fabricEventListener.isInitialized) {
                 fabricEventListener.onPlayerJoin(handler.player)

@@ -2,6 +2,7 @@ package com.panomc.plugins.pano.fabric
 
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
+import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import kotlinx.coroutines.runBlocking
@@ -89,10 +90,35 @@ class FabricEventListener(
         )
     }
 
+    fun onPlayerPreLogin(player: ServerPlayerEntity) {
+        val username = try {
+            val profile = player.gameProfile
+            try {
+                profile.javaClass.getMethod("name").invoke(profile) as String
+            } catch (_: NoSuchMethodException) {
+                profile.javaClass.getMethod("getName").invoke(profile) as String
+            }
+        } catch (_: Exception) {
+            player.name.string
+        }
+
+        runBlocking {
+            try {
+                listeners.filterIsInstance<OnPlayerPreLogin>().forEach {
+                    it.handle(this@FabricEventListener, player, username)
+                }
+            } catch (e: Exception) {
+                org.slf4j.LoggerFactory.getLogger("Pano").error("Error handling player pre-login", e)
+            }
+        }
+    }
+
     fun onPlayerJoin(player: ServerPlayerEntity) {
         runBlocking {
             try {
-                listeners.find { it is OnPlayerJoin }?.handle(this@FabricEventListener, player)
+                listeners.filterIsInstance<OnPlayerJoin>().forEach {
+                    it.handle(this@FabricEventListener, player)
+                }
             } catch (e: Exception) {
                 org.slf4j.LoggerFactory.getLogger("Pano").error("Error handling player join", e)
             }
@@ -102,7 +128,9 @@ class FabricEventListener(
     fun onPlayerDisconnect(player: ServerPlayerEntity) {
         runBlocking {
             try {
-                listeners.find { it is OnPlayerDisconnect }?.handle(this@FabricEventListener, player)
+                listeners.filterIsInstance<OnPlayerDisconnect>().forEach {
+                    it.handle(this@FabricEventListener, player)
+                }
             } catch (e: Exception) {
                 org.slf4j.LoggerFactory.getLogger("Pano").error("Error handling player disconnect", e)
             }

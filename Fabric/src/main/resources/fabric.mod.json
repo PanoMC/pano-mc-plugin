@@ -26,5 +26,8 @@
   },
   "suggests": {
     "luckperms": "*"
-  }
+  },
+  "mixins": [
+    "pano.mixins.json"
+  ]
 }
