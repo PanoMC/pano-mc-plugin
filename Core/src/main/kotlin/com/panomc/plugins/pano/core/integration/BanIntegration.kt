@@ -34,6 +34,10 @@ class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration 
         setOf(
             object : OnPlayerPreLogin() {
                 override suspend fun handle(eventHelper: EventHelper, vararg args: Any) {
+                    if (platformManager.getWebSocket() == null) {
+                        return
+                    }
+
                     val event = args[0]
                     val username = args[1] as String
 
