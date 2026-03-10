@@ -190,11 +190,12 @@ class PlatformManager(
         val faviconImage = pingData.faviconImage ?: serverData.favicon()
 
         if (faviconImage != null) {
-            requestBody
-                .put(
-                    "favicon",
-                    ImageUtil.bufferedImageToDataUrl(faviconImage)
-                )
+            val faviconDataUrl = ImageUtil.bufferedImageToDataUrl(faviconImage)
+
+            // Only send favicon if it's a safe image format (no SVG or other dangerous types)
+            if (ImageUtil.isAllowedImageDataUrl(faviconDataUrl)) {
+                requestBody.put("favicon", faviconDataUrl)
+            }
         }
 
         val motd = serverData.motd()
@@ -362,7 +363,11 @@ class PlatformManager(
             serverData.hostAddress(),
             serverData.port(),
             Pano.serverStartTime,
-            if (pingData.faviconImage != null || serverData.favicon() != null) ImageUtil.bufferedImageToDataUrl(pingData.faviconImage ?: serverData.favicon()!!) else null,
+            ImageUtil.sanitizeFaviconDataUrl(
+                if (pingData.faviconImage != null || serverData.favicon() != null)
+                    ImageUtil.bufferedImageToDataUrl(pingData.faviconImage ?: serverData.favicon()!!)
+                else null
+            ),
             serverData.motd()
         )
 
