@@ -5,7 +5,6 @@ val buildType: String by rootProject.extra
 plugins {
     kotlin("jvm")
     id("com.gradleup.shadow")
-    `maven-publish`
 }
 
 group = "com.panomc.plugins.pano"
@@ -80,14 +79,6 @@ tasks {
 
         if (project.gradle.startParameter.taskNames.contains("publish")) {
             archiveFileName.set(archiveFileName.get().lowercase())
-        }
-    }
-}
-
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            artifact(tasks.shadowJar)
         }
     }
 }

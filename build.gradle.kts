@@ -22,6 +22,22 @@ allprojects {
     }
 }
 
+subprojects {
+    if (name != "Fabric") {
+        apply(plugin = "maven-publish")
+
+        afterEvaluate {
+            extensions.findByType<PublishingExtension>()?.apply {
+                publications {
+                    create<MavenPublication>("maven") {
+                        artifact(tasks.named("shadowJar"))
+                    }
+                }
+            }
+        }
+    }
+}
+
 tasks.withType<Jar> {
     enabled = false
 }
