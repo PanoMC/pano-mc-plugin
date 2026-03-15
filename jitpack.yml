@@ -1,5 +1,2 @@
-jdk:
-  - openjdk17
-
 install:
-  - ./gradlew :Core:publishToMavenLocal :Spigot:publishToMavenLocal :Bungeecord:publishToMavenLocal :Velocity:publishToMavenLocal
+  - ./gradlew :Core:publishToMavenLocal
