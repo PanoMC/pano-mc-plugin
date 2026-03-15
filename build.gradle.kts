@@ -23,13 +23,21 @@ allprojects {
 }
 
 subprojects {
-    if (name != "Fabric") {
-        apply(plugin = "maven-publish")
+    apply(plugin = "maven-publish")
 
-        afterEvaluate {
-            extensions.findByType<PublishingExtension>()?.apply {
-                publications {
-                    create<MavenPublication>("maven") {
+    afterEvaluate {
+        if (name != "Fabric") {
+            tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
+                archiveClassifier.set("")
+            }
+        }
+
+        extensions.findByType<PublishingExtension>()?.apply {
+            publications {
+                create<MavenPublication>("maven") {
+                    if (name == "Fabric") {
+                        artifact(tasks.named("remapJar"))
+                    } else {
                         artifact(tasks.named("shadowJar"))
                     }
                 }
