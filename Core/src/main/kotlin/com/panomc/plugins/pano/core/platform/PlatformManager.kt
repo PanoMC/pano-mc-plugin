@@ -264,6 +264,9 @@ class PlatformManager(
         canConnect = false
         closeConnection()
 
+        // Notify integrations to unregister their events
+        pluginMain.onDisconnect()
+
         val platformConfig = configManager.config.platform!!
         val host = platformConfig.host
         val port = platformConfig.port
@@ -417,6 +420,9 @@ class PlatformManager(
 
     private fun onWebSocketClosed() {
         webSocket = null
+
+        // Notify integrations to unregister their events
+        pluginMain.onDisconnect()
 
         if (canConnect) {
             logger.info(pluginMain.translateColor("&6Lost connection to platform."))

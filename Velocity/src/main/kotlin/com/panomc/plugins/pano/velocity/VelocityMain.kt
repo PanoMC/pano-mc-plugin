@@ -171,6 +171,10 @@ class VelocityMain : PanoPluginMain {
         integrations.forEach { it.onConnectionEstablished(webSocket) }
     }
 
+    override fun onDisconnect() {
+        integrations.forEach { it.onDisconnect() }
+    }
+
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
         integrations.forEach { it.onServerSettingsChanged(serverSettings) }
     }

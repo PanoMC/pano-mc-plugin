@@ -38,6 +38,8 @@ interface PanoPluginMain {
 
     fun onConnectionEstablished(webSocket: WebSocket?) {}
 
+    fun onDisconnect() {}
+
     fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {}
 
     fun onPermissionsSnapshotUpdated(message: com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage) {}

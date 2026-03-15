@@ -157,6 +157,10 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
         stop()
     }
 
+    override fun onDisconnect() {
+        stop()
+    }
+
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
         if (serverSettings.authIntegration) {
             start()
