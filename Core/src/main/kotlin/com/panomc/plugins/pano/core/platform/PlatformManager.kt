@@ -226,6 +226,7 @@ class PlatformManager(
         var lastException: Exception? = null
 
         for ((h, p, s) in configsToTry) {
+            val scheme = if (s) "https" else "http"
             try {
                 val response = webClient
                     .post(p, h, "/api/server/connect")
@@ -234,18 +235,24 @@ class PlatformManager(
                     .sendJsonObject(requestBody)
                     .coAwait()
 
-                if (response.statusCode() == 200) {
-                    val body = response.bodyAsJsonObject()
-                    if (body != null && (body.containsKey("result") || body.containsKey("token"))) {
-                        finalResponse = response
-                        finalHost = h
-                        finalPort = p
-                        finalSsl = s
-                        break
-                    }
+                val body = try {
+                    response.bodyAsJsonObject()
+                } catch (_: Exception) {
+                    null
                 }
+
+                if (body != null && (body.containsKey("result") || body.containsKey("token"))) {
+                    finalResponse = response
+                    finalHost = h
+                    finalPort = p
+                    finalSsl = s
+                    break
+                }
+
+                logger.info("Tried $scheme://$h:$p - got status ${response.statusCode()} but no valid Pano response.")
             } catch (exception: Exception) {
                 lastException = exception
+                logger.info("Tried $scheme://$h:$p - failed: ${exception.message}")
             }
         }
 
@@ -274,6 +281,7 @@ class PlatformManager(
         val encryptionKey = EncryptUtil.decryptData(decodedEncryptionKey, privateKey)
 
         savePlatform(finalHost, finalPort, finalSsl, token, encryptionKey)
+        logger.info(pluginMain.translateColor("&2Connected to Pano Platform at ${if (finalSsl) "https" else "http"}://$finalHost:$finalPort"))
         canConnect = true
     }
 
