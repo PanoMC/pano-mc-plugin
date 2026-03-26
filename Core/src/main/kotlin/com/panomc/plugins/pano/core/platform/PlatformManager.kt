@@ -160,11 +160,25 @@ class PlatformManager(
             val h = uri.host ?: platformAddress
             val s = uri.scheme == "https"
             val p = if (uri.port != -1) uri.port else (if (s) 443 else 80)
+
+            if (p !in 0..65535) {
+                throw PanoError("&cError: Invalid port number '$p'. Port must be between 0 and 65535.")
+            }
+
             configsToTry.add(Triple(h, p, s))
         } else if (platformAddress.contains(":")) {
             val splitHost = platformAddress.split(":")
             val h = splitHost[0]
-            val p = splitHost[1].toIntOrNull() ?: 8088
+            val p = splitHost[1].toIntOrNull()
+
+            if (p == null) {
+                throw PanoError("&cError: Invalid port '${splitHost[1]}'. Port must be a number between 0 and 65535.")
+            }
+
+            if (p !in 0..65535) {
+                throw PanoError("&cError: Invalid port number '$p'. Port must be between 0 and 65535.")
+            }
+
             configsToTry.add(Triple(h, p, true))
             configsToTry.add(Triple(h, p, false))
         } else {
@@ -236,8 +250,11 @@ class PlatformManager(
         }
 
         if (finalResponse == null) {
-            lastException?.printStackTrace()
-            throw PanoError("&cCouldn't connect to Pano Platform. Checked all possible configurations. Checkout console for more detail.")
+            val triedConfigs = configsToTry.joinToString(", ") { (h, p, s) ->
+                "${if (s) "https" else "http"}://$h:$p"
+            }
+            logger.warning("Couldn't connect to Pano Platform. Tried: $triedConfigs. Last error: ${lastException?.message ?: "Unknown"}")
+            throw PanoError("&cCouldn't connect to Pano Platform. Tried: $triedConfigs")
         }
 
         val body = finalResponse.bodyAsJsonObject()
