@@ -104,6 +104,20 @@ jobs:
             -Pversion=${{ needs.get-next-version.outputs.new_tag_version }}
             -PtimeStamp=${{ steps.time.outputs.time }}
 
+      - name: Zip release JARs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in Core/build/libs Bungeecord/build/libs Spigot/build/libs Velocity/build/libs Fabric/build/libs; do
+            shopt -s nullglob
+            for jar in "$dir"/*.jar; do
+              zipfile="${jar%.jar}.zip"
+              rm -f "$zipfile"
+              zip -q -j "$zipfile" "$jar"
+            done
+            shopt -u nullglob
+          done
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:

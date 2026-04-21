@@ -40,6 +40,26 @@
             "label": false
           },
           {
+            "path": "Core/build/libs/*.zip",
+            "label": false
+          },
+          {
+            "path": "Bungeecord/build/libs/*.zip",
+            "label": false
+          },
+          {
+            "path": "Spigot/build/libs/*.zip",
+            "label": false
+          },
+          {
+            "path": "Velocity/build/libs/*.zip",
+            "label": false
+          },
+          {
+            "path": "Fabric/build/libs/*.zip",
+            "label": false
+          },
+          {
             "path": "LICENSE",
             "label": false
           }
