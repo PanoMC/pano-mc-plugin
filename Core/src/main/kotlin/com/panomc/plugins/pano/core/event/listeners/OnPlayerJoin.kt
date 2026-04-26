@@ -21,11 +21,6 @@ open class OnPlayerJoin(private val platformManager: PlatformManager, private va
         // On these platforms, the JOIN event fires before the player is fully added to the list
         if (pluginMain.getServerData().serverType() in listOf(
                 ServerType.FABRIC,
-                ServerType.FOLIA,
-                ServerType.PAPER,
-                ServerType.SPIGOT,
-                ServerType.BUKKIT,
-                ServerType.BUNGEECORD,
             )
         ) {
             playerCount += 1
