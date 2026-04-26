@@ -141,11 +141,21 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
 
         HandlerList.unregisterAll(this)
         panoPluginMain.registerEventListeners(eventManager.eventListeners)
-        reloadAuthMe()
+        // Pano’s custom password / event path is gone; AuthMe may still hold in-memory state that
+        // matched that integration. Reloading makes it re-read config and re-initialize cleanly.
+        // Only while Pano is still an enabled plugin: runTask on a disabled plugin throws.
+        if (panoPluginMain.isEnabled) {
+            reloadAuthMe()
+        }
 
         logger.info("&eAuthMe integration is disabled.".colorize())
 
         initialized = false
+    }
+
+    override fun onDisable() {
+        // Deterministic teardown while Spigot still allows task registration (see SpigotMain.onDisable order).
+        stop()
     }
 
     override fun onConnectionEstablished(webSocket: WebSocket?) {
@@ -229,6 +239,9 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
     }
 
     private fun reloadAuthMe() {
+        if (!panoPluginMain.isEnabled) {
+            return
+        }
         try {
             Bukkit.getScheduler().runTask(panoPluginMain, Runnable {
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "authme reload")

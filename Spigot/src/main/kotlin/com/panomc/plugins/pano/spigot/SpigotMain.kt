@@ -70,9 +70,13 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     }
 
     override fun onDisable() {
-        mPano.disable()
-
+        // Integrations first: they may need to schedule Bukkit tasks while the plugin is still
+        // enabled. Calling mPano.disable() first closes Vert.x asynchronously; the WebSocket
+        // onDisconnect can fire after the plugin is already disabled, which would break
+        // AuthMeIntegration's reload (runTask on a disabled plugin).
         integrations.forEach { it.onDisable() }
+
+        mPano.disable()
     }
 
     override fun registerCommands(commands: List<Command>) {
