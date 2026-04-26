@@ -1,12 +1,12 @@
 package com.panomc.plugins.pano.fabric
 
 import com.panomc.plugins.pano.core.helper.EventHelper
-import net.minecraft.text.Text
+import net.minecraft.network.chat.Component
 
 /**
  * EventHelper implementation for pre-login phase.
  * Instead of disconnecting immediately, stores the disallow state and message
- * so the Mixin can disconnect the player properly via player.networkHandler.disconnect().
+ * so the Mixin can disconnect the player properly via player.connection.disconnect().
  */
 class FabricPreLoginEventHelper(
     private val delegate: FabricEventListener
@@ -15,7 +15,7 @@ class FabricPreLoginEventHelper(
     var wasDisallowed = false
         private set
 
-    var disallowReason: Text? = null
+    var disallowReason: Component? = null
         private set
 
     override fun sendMessage(commandSender: Any, message: String) {

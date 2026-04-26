@@ -112,16 +112,15 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         logger.info("Pano registerCommands called with ${commands.size} commands")
 
         // Try to register on stored dispatcher from CommandRegistrationCallback
-        val dispatcher = server?.commandManager?.dispatcher
+        val dispatcher = server?.getCommands()?.getDispatcher()
         if (dispatcher != null) {
             commands.forEach { command ->
                 logger.info("Registering command '${command.name}' (as '${command.name.lowercase()}') on live dispatcher")
                 FabricCommand.register(dispatcher, command, this)
             }
 
-            // Send updated command tree to all online players
-            server?.playerManager?.playerList?.forEach { player ->
-                server?.commandManager?.sendCommandTree(player)
+            server?.getPlayerList()?.getPlayers()?.forEach { player ->
+                server?.getCommands()?.sendCommands(player)
             }
         } else {
             logger.warning("Server not available yet, commands will be registered when CommandRegistrationCallback fires")
@@ -224,7 +223,7 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     override fun kickPlayer(player: String, message: String) {
         server?.execute {
             try {
-                server?.playerManager?.getPlayer(player)?.networkHandler?.disconnect(
+                server?.getPlayerList()?.getPlayerByName(player)?.connection?.disconnect(
                     FabricTextHelper.parseColoredText(message)
                 )
             } catch (_: Exception) {

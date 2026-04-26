@@ -1,9 +1,13 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 val buildType: String by rootProject.extra
 
 plugins {
     kotlin("jvm")
     id("com.gradleup.shadow")
-    id("fabric-loom") version "1.9.2"
+    // 26.x: unobfuscated game; Loom 1.16+ (see fabric-example-mod/26.1.2)
+    id("net.fabricmc.fabric-loom") version "1.16.1"
 }
 
 group = "com.panomc.plugins.pano"
@@ -26,15 +30,12 @@ val shade: Configuration by configurations.creating {
 dependencies {
     testImplementation(kotlin("test"))
 
-    // Minecraft – provided by Fabric Loom
-    minecraft("com.mojang:minecraft:1.21.1")
-    mappings("net.fabricmc:yarn:1.21.1+build.3:v2")
+    // Minecraft 26.1.2 (Mojang "26.1" release line) – unobfuscated; no Yarn mappings
+    minecraft("com.mojang:minecraft:26.1.2")
 
-    // Fabric Loader – provided at runtime
-    modCompileOnly("net.fabricmc:fabric-loader:0.16.10")
-
-    // Fabric API – provided at runtime by fabric-api mod
-    modCompileOnly("net.fabricmc.fabric-api:fabric-api:0.116.2+1.21.1")
+    // Loader / API – at runtime (Loom 1.16+ unobfuscated: use compileOnly, not modCompileOnly)
+    compileOnly("net.fabricmc:fabric-loader:0.19.2")
+    compileOnly("net.fabricmc.fabric-api:fabric-api:0.146.1+26.1.2")
 
     // Core module – will be shaded into the final JAR
     shade(project(path = ":Core", configuration = "shadow"))
@@ -44,7 +45,18 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(25)
+}
+
+// Kotlin 2.2: JVM_25 target not available yet; match Java byte level to 24
+tasks.withType<KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_24)
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.release = 24
 }
 
 tasks.test {
@@ -69,8 +81,9 @@ tasks {
         manifest {
             val attrMap = mutableMapOf<String, String>()
 
-            if (project.gradle.startParameter.taskNames.contains("buildDev"))
+            if (project.gradle.startParameter.taskNames.contains("buildDev")) {
                 attrMap["MODE"] = "DEVELOPMENT"
+            }
 
             attrMap["VERSION"] = version.toString()
             attrMap["BUILD_TYPE"] = buildType
@@ -81,25 +94,17 @@ tasks {
         relocate("com.fasterxml.jackson", "com.panomc.shadow.jackson")
         relocate("io.netty", "vertx.io.netty")
 
-        archiveClassifier.set("dev-all")
-    }
-
-    remapJar {
-        dependsOn(shadowJar)
-        inputFile.set(shadowJar.get().archiveFile)
-
+        archiveClassifier.set("")
         archiveFileName.set("${rootProject.name}-fabric-${version}.jar")
-
         if (project.gradle.startParameter.taskNames.contains("publish")) {
             archiveFileName.set(archiveFileName.get().lowercase())
         }
     }
 
     build {
-        dependsOn(remapJar)
+        dependsOn(shadowJar)
         doLast {
-            // Clean up intermediate JARs, keep only the final remapped JAR
-            shadowJar.get().archiveFile.get().asFile.delete()
+            // Drop slim jar; the shaded JAR is the only distributable
             jar.get().archiveFile.get().asFile.delete()
         }
     }
@@ -113,7 +118,7 @@ tasks {
         doLast {
             if (project.gradle.startParameter.taskNames.contains("buildPluginDev")) {
                 copy {
-                    from(remapJar.get().archiveFile.get().asFile.absolutePath)
+                    from(shadowJar.get().archiveFile.get().asFile.absolutePath)
                     into("../../minecraft test servers/Fabric/mods")
                 }
             }

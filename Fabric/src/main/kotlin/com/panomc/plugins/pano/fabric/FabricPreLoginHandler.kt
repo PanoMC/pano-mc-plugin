@@ -2,23 +2,23 @@ package com.panomc.plugins.pano.fabric
 
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
 import kotlinx.coroutines.runBlocking
-import net.minecraft.server.network.ServerPlayerEntity
-import net.minecraft.text.Text
+import net.minecraft.network.chat.Component
+import net.minecraft.server.level.ServerPlayer
 
 /**
  * Handles pre-login checks (ban integration) before the player enters the game world.
- * Called from the PlayerManagerMixin before onPlayerConnect proceeds.
+ * Called from the PlayerListMixin before placeNewPlayer proceeds.
  *
- * Returns the disconnect reason Text if the player should be denied, or null to allow.
+ * Returns the disconnect reason Component if the player should be denied, or null to allow.
  */
 object FabricPreLoginHandler {
 
     internal var fabricMain: FabricMain? = null
 
     /**
-     * @return disconnect reason Text if the player was denied entry (e.g. banned), null to allow
+     * @return disconnect reason if the player was denied entry (e.g. banned), null to allow
      */
-    fun handlePreLogin(player: ServerPlayerEntity): Text? {
+    fun handlePreLogin(player: ServerPlayer): Component? {
         val main = fabricMain ?: return null
 
         val eventListener = main.getFabricEventListenerOrNull() ?: return null
@@ -29,14 +29,14 @@ object FabricPreLoginHandler {
         }
 
         val username = try {
-            val profile = player.gameProfile
+            val profile = player.getGameProfile()
             try {
                 profile.javaClass.getMethod("name").invoke(profile) as String
             } catch (_: NoSuchMethodException) {
                 profile.javaClass.getMethod("getName").invoke(profile) as String
             }
         } catch (_: Exception) {
-            player.name.string
+            player.getName().string
         }
 
         val preLoginHelper = FabricPreLoginEventHelper(eventListener)

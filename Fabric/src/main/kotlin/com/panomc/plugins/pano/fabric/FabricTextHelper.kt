@@ -1,49 +1,49 @@
 package com.panomc.plugins.pano.fabric
 
-import net.minecraft.text.MutableText
-import net.minecraft.text.Text
-import net.minecraft.util.Formatting
+import net.minecraft.ChatFormatting
+import net.minecraft.network.chat.Component
+import net.minecraft.network.chat.MutableComponent
 
 /**
- * Converts legacy `&` color-coded strings into proper Minecraft Text components
- * with Formatting styles. This ensures colors work both in-game and in console.
+ * Converts legacy `&` color-coded strings into proper Minecraft text components
+ * with ChatFormatting styles. This ensures colors work both in-game and in console.
  *
  * Supports: &0-9, &a-f, &r (reset), &l (bold), &o (italic), &n (underline), &m (strikethrough), &k (obfuscated)
  */
 object FabricTextHelper {
 
     private val COLOR_MAP = mapOf(
-        '0' to Formatting.BLACK,
-        '1' to Formatting.DARK_BLUE,
-        '2' to Formatting.DARK_GREEN,
-        '3' to Formatting.DARK_AQUA,
-        '4' to Formatting.DARK_RED,
-        '5' to Formatting.DARK_PURPLE,
-        '6' to Formatting.GOLD,
-        '7' to Formatting.GRAY,
-        '8' to Formatting.DARK_GRAY,
-        '9' to Formatting.BLUE,
-        'a' to Formatting.GREEN,
-        'b' to Formatting.AQUA,
-        'c' to Formatting.RED,
-        'd' to Formatting.LIGHT_PURPLE,
-        'e' to Formatting.YELLOW,
-        'f' to Formatting.WHITE,
-        'k' to Formatting.OBFUSCATED,
-        'l' to Formatting.BOLD,
-        'm' to Formatting.STRIKETHROUGH,
-        'n' to Formatting.UNDERLINE,
-        'o' to Formatting.ITALIC,
-        'r' to Formatting.RESET
+        '0' to ChatFormatting.BLACK,
+        '1' to ChatFormatting.DARK_BLUE,
+        '2' to ChatFormatting.DARK_GREEN,
+        '3' to ChatFormatting.DARK_AQUA,
+        '4' to ChatFormatting.DARK_RED,
+        '5' to ChatFormatting.DARK_PURPLE,
+        '6' to ChatFormatting.GOLD,
+        '7' to ChatFormatting.GRAY,
+        '8' to ChatFormatting.DARK_GRAY,
+        '9' to ChatFormatting.BLUE,
+        'a' to ChatFormatting.GREEN,
+        'b' to ChatFormatting.AQUA,
+        'c' to ChatFormatting.RED,
+        'd' to ChatFormatting.LIGHT_PURPLE,
+        'e' to ChatFormatting.YELLOW,
+        'f' to ChatFormatting.WHITE,
+        'k' to ChatFormatting.OBFUSCATED,
+        'l' to ChatFormatting.BOLD,
+        'm' to ChatFormatting.STRIKETHROUGH,
+        'n' to ChatFormatting.UNDERLINE,
+        'o' to ChatFormatting.ITALIC,
+        'r' to ChatFormatting.RESET
     )
 
     /**
-     * Parses a string with `&` color codes into a styled Text component.
+     * Parses a string with `&` color codes into a styled Component.
      * Example: "&6Pano &eMC Plugin" → Gold "Pano " + Yellow "MC Plugin"
      */
-    fun parseColoredText(message: String): Text {
-        val result: MutableText = Text.empty()
-        var currentFormatting = mutableListOf<Formatting>()
+    fun parseColoredText(message: String): Component {
+        val result: MutableComponent = Component.empty()
+        var currentFormatting = mutableListOf<ChatFormatting>()
         var currentText = StringBuilder()
         var i = 0
 
@@ -53,23 +53,20 @@ object FabricTextHelper {
                 val formatting = COLOR_MAP[code]
 
                 if (formatting != null) {
-                    // Flush current text with current formatting
                     if (currentText.isNotEmpty()) {
-                        val part = Text.literal(currentText.toString())
+                        val part: MutableComponent = Component.literal(currentText.toString())
                         if (currentFormatting.isNotEmpty()) {
-                            part.formatted(*currentFormatting.toTypedArray())
+                            part.withStyle(*currentFormatting.toTypedArray())
                         }
                         result.append(part)
                         currentText = StringBuilder()
                     }
 
-                    if (formatting == Formatting.RESET) {
+                    if (formatting == ChatFormatting.RESET) {
                         currentFormatting = mutableListOf()
                     } else if (formatting.isColor) {
-                        // Color codes reset all previous formatting
                         currentFormatting = mutableListOf(formatting)
                     } else {
-                        // Style codes (bold, italic, etc.) stack
                         currentFormatting.add(formatting)
                     }
 
@@ -82,11 +79,10 @@ object FabricTextHelper {
             i++
         }
 
-        // Flush remaining text
         if (currentText.isNotEmpty()) {
-            val part = Text.literal(currentText.toString())
+            val part = Component.literal(currentText.toString())
             if (currentFormatting.isNotEmpty()) {
-                part.formatted(*currentFormatting.toTypedArray())
+                part.withStyle(*currentFormatting.toTypedArray())
             }
             result.append(part)
         }

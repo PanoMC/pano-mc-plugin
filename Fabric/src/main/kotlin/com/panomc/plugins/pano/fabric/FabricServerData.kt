@@ -8,13 +8,13 @@ class FabricServerData(private val server: MinecraftServer) : ServerData {
     override fun serverName(): String = "Fabric"
 
     override fun motd(): String = try {
-        server.serverMotd
+        server.getMotd()
     } catch (_: Exception) {
         ""
     }
 
     override fun port(): Int = try {
-        server.serverPort
+        server.getPort()
     } catch (_: Exception) {
         25565
     }
@@ -22,19 +22,17 @@ class FabricServerData(private val server: MinecraftServer) : ServerData {
     override fun serverType(): ServerType = ServerType.FABRIC
 
     override fun serverVersion(): String = try {
-        server.version
+        server.getServerVersion()
     } catch (_: Exception) {
         "unknown"
     }
 
     override fun playerCount(): Int {
         return try {
-            val count = server.playerManager.playerList.size
-            count
+            server.getPlayerList().getPlayerCount()
         } catch (e: Exception) {
             try {
-                val count = server.currentPlayerCount
-                count
+                server.getPlayerCount()
             } catch (e2: Exception) {
                 org.slf4j.LoggerFactory.getLogger("Pano").error("Failed to get player count", e2)
                 0
@@ -43,12 +41,8 @@ class FabricServerData(private val server: MinecraftServer) : ServerData {
     }
 
     override fun maxPlayerCount(): Int = try {
-        server.playerManager.maxPlayerCount
+        server.getPlayerList().getMaxPlayers()
     } catch (_: Exception) {
-        try {
-            server.maxPlayerCount
-        } catch (_: Exception) {
-            20
-        }
+        20
     }
 }

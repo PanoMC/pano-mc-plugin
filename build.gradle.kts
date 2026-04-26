@@ -36,7 +36,7 @@ subprojects {
             publications {
                 create<MavenPublication>("maven") {
                     if (name == "Fabric") {
-                        artifact(tasks.named("remapJar"))
+                        artifact(tasks.named("shadowJar"))
                     } else {
                         artifact(tasks.named("shadowJar"))
                     }

@@ -6,8 +6,8 @@ import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import kotlinx.coroutines.runBlocking
-import net.minecraft.server.command.ServerCommandSource
-import net.minecraft.server.network.ServerPlayerEntity
+import net.minecraft.commands.CommandSourceStack
+import net.minecraft.server.level.ServerPlayer
 
 class FabricEventListener(
     private val pluginMain: PanoPluginMain,
@@ -17,49 +17,45 @@ class FabricEventListener(
     override fun sendMessage(commandSender: Any, message: String) {
         val text = FabricTextHelper.parseColoredText(message)
         when (commandSender) {
-            is ServerPlayerEntity -> commandSender.sendMessage(text)
-            is ServerCommandSource -> commandSender.sendMessage(text)
+            is ServerPlayer -> commandSender.sendSystemMessage(text)
+            is CommandSourceStack -> commandSender.sendSystemMessage(text)
         }
     }
 
     override fun kick(commandSender: Any, message: String) {
-        (commandSender as? ServerPlayerEntity)?.networkHandler?.disconnect(
+        (commandSender as? ServerPlayer)?.connection?.disconnect(
             FabricTextHelper.parseColoredText(message)
         )
     }
 
     override fun disallow(event: Any, message: String) {
-        // In Fabric, there's no direct event cancellation like Spigot's PlayerLoginEvent.
-        // We kick the player instead if needed.
-        (event as? ServerPlayerEntity)?.networkHandler?.disconnect(
+        (event as? ServerPlayer)?.connection?.disconnect(
             FabricTextHelper.parseColoredText(message)
         )
     }
 
     override fun convertToPlayerData(player: Any): EventHelper.Companion.PlayerData {
-        val playerInstance = player as ServerPlayerEntity
+        val playerInstance = player as ServerPlayer
 
         val playerName = try {
-            val profile = playerInstance.gameProfile
-            // Try Record-style accessor first (MC 1.21.11+), then legacy getter
+            val profile = playerInstance.getGameProfile()
             try {
                 profile.javaClass.getMethod("name").invoke(profile) as String
             } catch (_: NoSuchMethodException) {
                 profile.javaClass.getMethod("getName").invoke(profile) as String
             }
         } catch (_: Exception) {
-            playerInstance.name.string
+            playerInstance.getName().string
         }
 
         val ping = try {
-            playerInstance.networkHandler.latency.toLong()
+            playerInstance.connection.latency().toLong()
         } catch (_: Exception) {
             0L
         }
 
         val ipAddress = try {
-            val handler = playerInstance.networkHandler
-            // connection field is protected, use reflection
+            val handler = playerInstance.connection
             val connectionField = handler.javaClass.superclass.getDeclaredField("connection")
             connectionField.isAccessible = true
             val connection = connectionField.get(handler)
@@ -68,8 +64,7 @@ class FabricEventListener(
             address.toString().replace("/", "").split(":")[0]
         } catch (_: Exception) {
             try {
-                // Fallback: try getIp() or similar methods
-                val handler = playerInstance.networkHandler
+                val handler = playerInstance.connection
                 handler.javaClass.methods.find {
                     it.name.contains(
                         "address",
@@ -83,23 +78,23 @@ class FabricEventListener(
         }
 
         return EventHelper.Companion.PlayerData(
-            uuid = playerInstance.uuid,
+            uuid = playerInstance.getUUID(),
             username = playerName,
             ping = ping,
             ipAddress = ipAddress
         )
     }
 
-    fun onPlayerPreLogin(player: ServerPlayerEntity) {
+    fun onPlayerPreLogin(player: ServerPlayer) {
         val username = try {
-            val profile = player.gameProfile
+            val profile = player.getGameProfile()
             try {
                 profile.javaClass.getMethod("name").invoke(profile) as String
             } catch (_: NoSuchMethodException) {
                 profile.javaClass.getMethod("getName").invoke(profile) as String
             }
         } catch (_: Exception) {
-            player.name.string
+            player.getName().string
         }
 
         runBlocking {
@@ -113,7 +108,7 @@ class FabricEventListener(
         }
     }
 
-    fun onPlayerJoin(player: ServerPlayerEntity) {
+    fun onPlayerJoin(player: ServerPlayer) {
         runBlocking {
             try {
                 listeners.filterIsInstance<OnPlayerJoin>().forEach {
@@ -125,7 +120,7 @@ class FabricEventListener(
         }
     }
 
-    fun onPlayerDisconnect(player: ServerPlayerEntity) {
+    fun onPlayerDisconnect(player: ServerPlayer) {
         runBlocking {
             try {
                 listeners.filterIsInstance<OnPlayerDisconnect>().forEach {
