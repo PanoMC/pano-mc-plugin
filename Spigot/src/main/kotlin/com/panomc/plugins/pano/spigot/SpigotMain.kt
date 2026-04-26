@@ -16,6 +16,7 @@ import org.bukkit.command.CommandMap
 import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
 import java.net.URLClassLoader
+import java.util.*
 import java.util.function.Consumer
 import java.util.logging.Logger
 
@@ -197,5 +198,12 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         server.scheduler.runTask(this, Runnable {
             server.getPlayer(player)?.kickPlayer(message)
         })
+    }
+
+    /**
+     * Matches the server’s own never-joined / offline name→UUID mapping (version-accurate).
+     */
+    override fun getNeverJoinedPlayerUniqueId(minecraftName: String): UUID {
+        return Bukkit.getOfflinePlayer(minecraftName).uniqueId
     }
 }

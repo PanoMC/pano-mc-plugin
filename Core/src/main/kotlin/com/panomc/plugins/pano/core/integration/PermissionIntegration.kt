@@ -11,10 +11,7 @@ import com.panomc.plugins.pano.core.platform.request.SavePermissionsSnapshotRequ
 import io.vertx.core.http.WebSocket
 import io.vertx.core.json.JsonObject
 import io.vertx.kotlin.coroutines.dispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.luckperms.api.LuckPermsProvider
@@ -101,6 +98,9 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         api: net.luckperms.api.LuckPerms,
         pushAfterSync: Boolean
     ) {
+        // LuckPerms .join() calls are blocking. Never run them on the Vert.x event loop or the
+        // server can appear to freeze while WebSocket / ticks stall behind a long critical section.
+        withContext(Dispatchers.IO) {
         syncMutex.withLock {
             syncInProgress = true
             // Avoid push-back storm while we are applying our own sync changes.
@@ -161,6 +161,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         // groups/users/permissions get registered on the Pano side as well.
         if (pushAfterSync) {
             schedulePostSyncPushback()
+        }
         }
     }
 
@@ -336,8 +337,8 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             if (uuid == null) {
                 logger.warning(
                     panoPluginMain.translateColor(
-                        "&eCould not resolve Minecraft UUID for Pano user '$username'. " +
-                                "Permissions will be synced next time this user is seen by LuckPerms."
+                        "&eCould not resolve UUID for Pano user (empty username, holder id $userId). " +
+                                "Fix the player name on the platform."
                     )
                 )
                 return@forEach
@@ -364,19 +365,39 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
     }
 
     /**
-     * Resolve a Minecraft UUID from a username using LuckPerms.
+     * Resolve a stable UUID to store under in LuckPerms.
      *
-     * Tries LuckPerms' cached username table first, then falls back to the Mojang profile lookup
-     * that LuckPerms configures when running in online mode.
+     * Order: LuckPerms cache + Mojang ([UserManager#lookupUniqueId]) when available, then
+     * [PanoPluginMain.getNeverJoinedPlayerUniqueId] so Pano can sync panel users who have
+     * never connected (or when Mojang has no public profile for the name) — same idea as
+     * offline/never-joined Bukkit players.
      */
     private fun resolveLuckPermsUuid(
         api: net.luckperms.api.LuckPerms,
         username: String
     ): UUID? {
+        if (username.isBlank()) return null
         return try {
-            api.userManager.lookupUniqueId(username).join()
+            val fromLp = api.userManager.lookupUniqueId(username).join()
+            if (fromLp != null) {
+                fromLp
+            } else {
+                val fallback = panoPluginMain.getNeverJoinedPlayerUniqueId(username)
+                logger.info(
+                    panoPluginMain.translateColor(
+                        "&7Permission sync: no Mojang/LP UUID for &f'$username'&7, using server offline-style id &7(${fallback})&7 so LuckPerms can be updated before first join."
+                    )
+                )
+                fallback
+            }
         } catch (_: Exception) {
-            null
+            val fallback = panoPluginMain.getNeverJoinedPlayerUniqueId(username)
+            logger.info(
+                panoPluginMain.translateColor(
+                    "&7Permission sync: could not look up &f'$username'&7; using server offline-style id &7(${fallback})&7."
+                )
+            )
+            fallback
         }
     }
 
@@ -597,7 +618,8 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
      *   they are not lost to the platform's truncate-and-replace.
      */
     private suspend fun pushLuckPermsSnapshotToPlatform() {
-        val api = getLuckPermsOrNull() ?: return
+        withContext(Dispatchers.IO) {
+            val api = getLuckPermsOrNull() ?: return@withContext
 
         val backendSnapshot = platformManager.sendMessageAwaitResponse<GetPermissionsMessage>(
             GetPermissionsRequest(),
@@ -715,6 +737,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         )
 
         platformManager.sendMessage(SavePermissionsSnapshotRequest(snapshotMap))
+        }
     }
 
     /**
@@ -725,7 +748,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
      * Subsequent pushes only include currently-loaded users - offline ones are preserved from the
      * backend snapshot in [pushLuckPermsSnapshotToPlatform].
      */
-    private fun collectLuckPermsUsersForSnapshot(api: net.luckperms.api.LuckPerms): List<User> {
+    private suspend fun collectLuckPermsUsersForSnapshot(api: net.luckperms.api.LuckPerms): List<User> {
         if (lpUsersBootstrapped) {
             return api.userManager.loadedUsers.toList()
         }
@@ -733,9 +756,15 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         val users = try {
             val uniqueUsers = api.userManager.uniqueUsers.join()
             val accumulator = mutableListOf<User>()
-            uniqueUsers.forEach { uuid ->
+            var index = 0
+            for (uuid in uniqueUsers) {
+                if (index > 0 && index % 32 == 0) {
+                    // Avoid monopolising the server / storage layer during large LP databases.
+                    yield()
+                }
+                index++
                 try {
-                    val user = api.userManager.loadUser(uuid).join() ?: return@forEach
+                    val user = api.userManager.loadUser(uuid).join() ?: continue
                     accumulator.add(user)
                 } catch (_: Exception) {
                     // Skip users we can't load; they'll be picked up on next mutation/load.
