@@ -5,10 +5,13 @@ import com.panomc.plugins.pano.core.helper.CommandHelper
 import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.platform.PlatformManager
 import com.panomc.plugins.pano.core.platform.message.response.GenerateLinkCodeMessage
+import com.panomc.plugins.pano.core.platform.message.response.GenerateLinkCodeStatus
 import com.panomc.plugins.pano.core.platform.request.GenerateLinkCodeRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.ceil
 
 class LinkCommand(
     private val platformManager: PlatformManager,
@@ -20,6 +23,15 @@ class LinkCommand(
     override val permissionMessage: String = "You do not have permission!"
     override val usage: String = "/link"
 
+    // Per-player cooldown timestamps (epoch ms when the cooldown expires).
+    // Mirrors the 30s validity of a link code on the server so spamming the
+    // command never produces a different code or floods the websocket.
+    private val cooldowns = ConcurrentHashMap<String, Long>()
+
+    companion object {
+        private const val COOLDOWN_MS = 30_000L
+    }
+
     override suspend fun handler(commandSender: Any, args: Array<out String>, commandHelper: CommandHelper): Boolean {
         if (!commandHelper.isPlayer(commandSender)) {
             val message = i18nManager.translate(i18nManager.platformLocale, "auth.link.only-players")!!
@@ -29,6 +41,25 @@ class LinkCommand(
         }
 
         val username = commandHelper.getUsername(commandSender)
+        val cooldownKey = username.lowercase()
+
+        val now = System.currentTimeMillis()
+        val cooldownUntil = cooldowns[cooldownKey]
+        if (cooldownUntil != null && cooldownUntil > now) {
+            val remainingSeconds = ceil((cooldownUntil - now) / 1000.0).toLong().coerceAtLeast(1L)
+            val message = i18nManager.translate(
+                i18nManager.platformLocale,
+                "auth.link.cooldown",
+                mapOf("seconds" to remainingSeconds)
+            )!!
+
+            commandHelper.sendMessage(commandSender, message)
+            return true
+        }
+
+        // Reserve the cooldown slot up-front so concurrent invocations cannot
+        // bypass throttling while we are awaiting the platform response.
+        cooldowns[cooldownKey] = now + COOLDOWN_MS
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -37,10 +68,35 @@ class LinkCommand(
                     GenerateLinkCodeMessage::class.java
                 )
 
-                val message = i18nManager.translate(i18nManager.platformLocale, "auth.link.code-message", mapOf("code" to response.code))!!
-                
+                val message = when (response.status) {
+                    GenerateLinkCodeStatus.ALREADY_REGISTERED -> {
+                        // No code was generated and no cooldown is needed: the player
+                        // can keep playing without ever needing to /link again.
+                        cooldowns.remove(cooldownKey)
+                        i18nManager.translate(i18nManager.platformLocale, "auth.link.already-registered")!!
+                    }
+                    GenerateLinkCodeStatus.USER_NOT_FOUND -> {
+                        cooldowns.remove(cooldownKey)
+                        i18nManager.translate(i18nManager.platformLocale, "auth.link.user-not-found")!!
+                    }
+                    GenerateLinkCodeStatus.SUCCESS -> {
+                        val code = response.code
+                        if (code.isNullOrEmpty()) {
+                            cooldowns.remove(cooldownKey)
+                            i18nManager.translate(i18nManager.platformLocale, "auth.link.failed")!!
+                        } else {
+                            i18nManager.translate(
+                                i18nManager.platformLocale,
+                                "auth.link.code-message",
+                                mapOf("code" to code)
+                            )!!
+                        }
+                    }
+                }
+
                 commandHelper.sendMessage(commandSender, message)
             } catch (e: Exception) {
+                cooldowns.remove(cooldownKey)
                 val message = i18nManager.translate(i18nManager.platformLocale, "auth.link.failed")!!
 
                 commandHelper.sendMessage(commandSender, message)
