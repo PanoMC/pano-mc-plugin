@@ -60,6 +60,16 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
     private var lpUsersBootstrapped: Boolean = false
     private val syncMutex = Mutex()
 
+    /**
+     * While LuckPerms is unavailable, [initialized] stays false, so we track these separately
+     * to avoid duplicate startup / LP-missing logs when [start] is triggered from both
+     * connection and server-settings updates (and from the LP retry timer).
+     */
+    private var loggedAwaitingLuckPermsStartup: Boolean = false
+    private var loggedLuckPermsClassMissing: Boolean = false
+    private var loggedLuckPermsProviderNotReady: Boolean = false
+    private var loggedLuckPermsOtherMessage: String? = null
+
     override fun isInitialized() = initialized
 
     private suspend fun start(pushAfterSync: Boolean) {
@@ -67,8 +77,11 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             return
         }
 
-        if (!initialized) {
-            logger.info("&ePermission integration is enabled, loading...".colorize())
+        synchronized(this) {
+            if (!initialized && !loggedAwaitingLuckPermsStartup) {
+                logger.info("&ePermission integration is enabled, loading...".colorize())
+                loggedAwaitingLuckPermsStartup = true
+            }
         }
 
         // Don't set initialized or hook unless LuckPerms is actually available.
@@ -165,12 +178,22 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         }
     }
 
-    private fun stop() {
-        if (!initialized) {
-            return
-        }
+    private fun resetLuckPermsWarningLogDedupe() {
+        loggedLuckPermsClassMissing = false
+        loggedLuckPermsProviderNotReady = false
+        loggedLuckPermsOtherMessage = null
+    }
 
-        logger.info("&ePermission integration is disabled.".colorize())
+    private fun resetLuckPermsAvailabilityLogDedupe() {
+        loggedAwaitingLuckPermsStartup = false
+        resetLuckPermsWarningLogDedupe()
+    }
+
+    private fun stop() {
+        val wasInitialized = initialized
+        if (wasInitialized) {
+            logger.info("&ePermission integration is disabled.".colorize())
+        }
 
         pushSnapshotJob?.cancel()
         pushSnapshotJob = null
@@ -186,6 +209,9 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         lpUsersBootstrapped = false
 
         initialized = false
+        synchronized(this) {
+            resetLuckPermsAvailabilityLogDedupe()
+        }
     }
 
     override fun onConnectionEstablished(webSocket: WebSocket?) {
@@ -793,17 +819,35 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         return try {
             // Check if LuckPermsProvider class is available at runtime
             Class.forName("net.luckperms.api.LuckPermsProvider")
-            LuckPermsProvider.get()
+            val api = LuckPermsProvider.get()
+            synchronized(this) {
+                resetLuckPermsWarningLogDedupe()
+            }
+            api
         } catch (_: ClassNotFoundException) {
-            // LuckPermsProvider class is not available (LuckPerms not installed)
-            logger.warning(panoPluginMain.translateColor("&eLuckPerms is not installed. Permission integration will not work."))
+            synchronized(this) {
+                if (!loggedLuckPermsClassMissing) {
+                    loggedLuckPermsClassMissing = true
+                    logger.warning(panoPluginMain.translateColor("&eLuckPerms is not installed. Permission integration will not work."))
+                }
+            }
             null
         } catch (_: IllegalStateException) {
-            // LuckPermsProvider throws an IllegalStateException when the API isn't loaded yet.
-            logger.warning(panoPluginMain.translateColor("&eLuckPerms API isn't loaded yet. Is LuckPerms installed and enabled?"))
+            synchronized(this) {
+                if (!loggedLuckPermsProviderNotReady) {
+                    loggedLuckPermsProviderNotReady = true
+                    logger.warning(panoPluginMain.translateColor("&eLuckPerms API isn't loaded yet. Is LuckPerms installed and enabled?"))
+                }
+            }
             null
         } catch (e: Exception) {
-            logger.warning(panoPluginMain.translateColor("&eFailed to access LuckPerms API: ${e.message}"))
+            val msg = e.message ?: e.javaClass.simpleName
+            synchronized(this) {
+                if (loggedLuckPermsOtherMessage != msg) {
+                    loggedLuckPermsOtherMessage = msg
+                    logger.warning(panoPluginMain.translateColor("&eFailed to access LuckPerms API: $msg"))
+                }
+            }
             null
         }
     }
