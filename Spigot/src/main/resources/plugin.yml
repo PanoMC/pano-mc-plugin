@@ -6,14 +6,15 @@ description: An advanced web platform for Minecraft servers.
 website: http://panomc.com
 api-version: '1.13'
 folia-supported: true
-#commands:
-#  pano:
-#    description: Runs Pano commands.
-#    permission: pano.admin
-#    permission-message: You do not have permission!
-#  link:
-#    description: Link your account with website.
-#    default: true
+commands:
+  pano:
+    description: Runs Pano commands.
+    usage: /pano
+    permission: pano.admin
+    permission-message: You do not have permission!
+  link:
+    description: Link your account with website.
+    usage: /link
 permissions:
   pano.admin:
     description: Allows Pano command.

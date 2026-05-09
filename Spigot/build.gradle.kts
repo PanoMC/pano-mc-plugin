@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 val buildType: String by rootProject.extra
 
 plugins {
@@ -9,6 +11,7 @@ group = "com.panomc.plugins.pano"
 version = rootProject.version
 
 repositories {
+    maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
     maven("https://repo.codemc.org/repository/maven-public/")
 }
 
@@ -17,15 +20,18 @@ dependencies {
 
     implementation(project(":Core"))
 
-//     paper / spigot20
-    compileOnly("io.papermc.paper:paper-api:1.17-R0.1-SNAPSHOT")
+//    Compile against the oldest supported Bukkit/Spigot surface; newer server APIs are reflected.
+    compileOnly("org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT")
 
 //    AuthMe Reloaded
     compileOnly("fr.xephi:authme:5.6.1-SNAPSHOT")
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(11)
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
+    }
 }
 
 tasks.test {

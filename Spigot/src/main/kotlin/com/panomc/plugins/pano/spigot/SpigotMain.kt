@@ -15,9 +15,11 @@ import org.bukkit.ChatColor
 import org.bukkit.command.CommandMap
 import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.java.JavaPlugin
+import java.net.URL
 import java.net.URLClassLoader
 import java.util.*
 import java.util.function.Consumer
+import java.util.jar.Manifest
 import java.util.logging.Logger
 
 class SpigotMain : JavaPlugin(), PanoPluginMain {
@@ -87,8 +89,19 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
             .forEach { command ->
                 this.commands.add(command)
 
-                commandMap.register(name, command)
+                val pluginCommand = getCommand(command.name.lowercase())
+                if (pluginCommand != null) {
+                    pluginCommand.description = command.description
+                    pluginCommand.usage = command.usage
+                    pluginCommand.permission = command.permission
+                    pluginCommand.permissionMessage = command.permissionMessage
+                    pluginCommand.setExecutor(command)
+                } else {
+                    commandMap.register(name, command)
+                }
             }
+
+        syncRegisteredCommands()
     }
 
     override fun unregisterCommands(commands: List<Command>) {
@@ -100,6 +113,8 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
             }
 
         this.commands.clear()
+
+        syncRegisteredCommands()
     }
 
     private fun getCommandMap(): CommandMap {
@@ -108,6 +123,26 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         commandMapField.isAccessible = true
 
         return commandMapField.get(Bukkit.getServer()) as CommandMap
+    }
+
+    private fun syncRegisteredCommands() {
+        try {
+            server.javaClass.getMethod("syncCommands").invoke(server)
+        } catch (_: NoSuchMethodException) {
+            // 1.8 has no client command tree to sync.
+        } catch (exception: Exception) {
+            mPanoLogger.warning("Failed to sync server commands: ${exception.message}")
+        }
+
+        server.onlinePlayers.forEach { player ->
+            try {
+                player.javaClass.getMethod("updateCommands").invoke(player)
+            } catch (_: NoSuchMethodException) {
+                // Older Bukkit players do not expose updateCommands.
+            } catch (exception: Exception) {
+                mPanoLogger.warning("Failed to sync commands for ${player.name}: ${exception.message}")
+            }
+        }
     }
 
     override fun registerSchedule(task: () -> Unit) {
@@ -159,7 +194,48 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     override fun getServerData(): ServerData = serverData
 
-    override fun getPluginClassLoader(): URLClassLoader = classLoader as URLClassLoader
+    override fun getPluginClassLoader(): URLClassLoader {
+        val pluginClassLoader = javaClass.classLoader
+        if (pluginClassLoader is URLClassLoader) {
+            return pluginClassLoader
+        }
+
+        val panoManifestUrl = findPanoManifestUrl(pluginClassLoader)
+        return object : URLClassLoader(emptyArray(), pluginClassLoader) {
+            override fun findResource(name: String?): URL? {
+                if (name == "META-INF/MANIFEST.MF" && panoManifestUrl != null) {
+                    return panoManifestUrl
+                }
+                return pluginClassLoader.getResource(name)
+            }
+
+            override fun findResources(name: String?): Enumeration<URL> = pluginClassLoader.getResources(name)
+        }
+    }
+
+    private fun findPanoManifestUrl(pluginClassLoader: ClassLoader): URL? {
+        return try {
+            val manifestUrls = pluginClassLoader.getResources("META-INF/MANIFEST.MF")
+            while (manifestUrls.hasMoreElements()) {
+                val url = manifestUrls.nextElement()
+                try {
+                    url.openStream().use { stream ->
+                        val manifest = Manifest(stream)
+                        if (manifest.mainAttributes.getValue("VERSION") != null &&
+                            manifest.mainAttributes.getValue("BUILD_TYPE") != null
+                        ) {
+                            return url
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Skip unreadable manifests from shaded dependencies.
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     override fun translateColor(text: String): String = ChatColor.translateAlternateColorCodes('&', text)
 
@@ -199,9 +275,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     }
 
     override fun kickPlayer(player: String, message: String) {
-        server.scheduler.runTask(this, Runnable {
-            server.getPlayer(player)?.kickPlayer(message)
-        })
+        SpigotServerUtil.kickPlayer(this, server.getPlayer(player) ?: return, message)
     }
 
     /**

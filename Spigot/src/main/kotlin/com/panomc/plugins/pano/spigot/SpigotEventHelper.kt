@@ -1,13 +1,12 @@
 package com.panomc.plugins.pano.spigot
 
 import com.panomc.plugins.pano.core.helper.EventHelper
-import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent
 
 class SpigotEventHelper(
-    private val pluginMain: PanoPluginMain
+    private val pluginMain: SpigotMain
 ) : EventHelper {
 
     override fun sendMessage(commandSender: Any, message: String) {
@@ -15,7 +14,7 @@ class SpigotEventHelper(
     }
 
     override fun kick(commandSender: Any, message: String) {
-        (commandSender as Player).kickPlayer(pluginMain.translateColor(message))
+        SpigotServerUtil.kickPlayer(pluginMain, commandSender as Player, pluginMain.translateColor(message))
     }
 
     override fun disallow(event: Any, message: String) {
@@ -28,8 +27,8 @@ class SpigotEventHelper(
         return EventHelper.Companion.PlayerData(
             uuid = playerInstance.uniqueId,
             username = playerInstance.name,
-            ping = playerInstance.ping.toLong(),
-            ipAddress = playerInstance.address.address.hostAddress
+            ping = SpigotServerUtil.getPlayerPing(playerInstance),
+            ipAddress = SpigotServerUtil.getPlayerIp(playerInstance) ?: "unknown"
         )
     }
 }

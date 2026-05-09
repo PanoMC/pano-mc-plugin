@@ -7,6 +7,7 @@ import com.panomc.plugins.pano.core.platform.message.response.*
 import com.panomc.plugins.pano.core.platform.request.*
 import com.panomc.plugins.pano.core.util.EmailUtil.maskEmail
 import com.panomc.plugins.pano.spigot.SpigotMain
+import com.panomc.plugins.pano.spigot.SpigotServerUtil
 import com.panomc.plugins.pano.spigot.SpigotServerUtil.getPlayerIp
 import fr.xephi.authme.api.v3.AuthMeApi
 import fr.xephi.authme.events.LoginEvent
@@ -286,7 +287,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             )
 
             if (registerResponse.error != null) {
-                player.kickPlayer("")
+                SpigotServerUtil.kickPlayer(panoPluginMain, player, "")
                 logger.severe("&cAn error occurred during the registration of \"$playerName\": ${registerResponse.error}".colorize())
                 return@runBlocking
             }
@@ -296,7 +297,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             if (platformManager.serverSettings.authKickAfterRegister) {
                 val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")!!
 
-                player.kickPlayer(message.colorize())
+                SpigotServerUtil.kickPlayer(panoPluginMain, player, message.colorize())
             }
         }
     }
@@ -435,7 +436,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
                 if ((player?.isOnline ?: false) && platformManager.serverSettings.authKickAfterRegister) {
                     val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")!!
 
-                    player.kickPlayer(message.colorize())
+                    SpigotServerUtil.kickPlayer(panoPluginMain, player, message.colorize())
                 }
             }
         }
@@ -519,7 +520,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
                 if ((player?.isOnline ?: false) && platformManager.serverSettings.authKickAfterRegister) {
                     val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")!!
 
-                    player.kickPlayer(message.colorize())
+                    SpigotServerUtil.kickPlayer(panoPluginMain, player, message.colorize())
                 }
             }
         }
