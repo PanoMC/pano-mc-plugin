@@ -79,7 +79,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
 
         synchronized(this) {
             if (!initialized && !loggedAwaitingLuckPermsStartup) {
-                logger.info("&ePermission integration is enabled, loading...".colorize())
+                logger.info("Permission integration is enabled, loading...")
                 loggedAwaitingLuckPermsStartup = true
             }
         }

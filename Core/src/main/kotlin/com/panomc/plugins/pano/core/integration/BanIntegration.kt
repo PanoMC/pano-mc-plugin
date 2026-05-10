@@ -93,7 +93,7 @@ class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration 
 
         initialized = true
 
-        logger.info("&eBan integration is enabled, hooking...".colorize())
+        logger.info("Ban integration is enabled, hooking...")
 
         registerEvents()
 
