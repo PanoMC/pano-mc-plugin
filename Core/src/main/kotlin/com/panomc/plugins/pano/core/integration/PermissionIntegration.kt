@@ -1,6 +1,7 @@
 package com.panomc.plugins.pano.core.integration
 
-import com.panomc.plugins.pano.core.Pano
+import com.panomc.plugins.pano.core.event.Listener
+import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.Integration
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.platform.message.response.GetPermissionsMessage
@@ -9,6 +10,7 @@ import com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapsho
 import com.panomc.plugins.pano.core.platform.request.GetPermissionsRequest
 import com.panomc.plugins.pano.core.platform.request.SavePermissionsSnapshotRequest
 import io.vertx.core.http.WebSocket
+import io.vertx.core.json.JsonArray
 import io.vertx.core.json.JsonObject
 import io.vertx.kotlin.coroutines.dispatcher
 import kotlinx.coroutines.*
@@ -32,6 +34,7 @@ import net.luckperms.api.track.Track
 import java.io.File
 import java.time.Instant
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import com.panomc.plugins.pano.core.platform.entity.PermissionNode as PanoPermissionNode
 
 
@@ -53,12 +56,17 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
     private val lpSubscriptions: MutableList<EventSubscription<*>> = mutableListOf()
     private var pushSnapshotJob: Job? = null
     private var lpRetryJob: Job? = null
-    private var postSyncPushJob: Job? = null
     @Volatile private var suppressPushUntilMillis: Long = 0L
     @Volatile
     private var syncInProgress: Boolean = false
-    private var lpUsersBootstrapped: Boolean = false
     private val syncMutex = Mutex()
+    private val currentPlayerUuidByUsername = ConcurrentHashMap<String, UUID>()
+    private val playerJoinListener = object : Listener {
+        override suspend fun handle(eventHelper: EventHelper, vararg args: Any) {
+            val playerData = eventHelper.convertToPlayerData(args[0])
+            rememberJoinedPlayer(playerData)
+        }
+    }
 
     /**
      * While LuckPerms is unavailable, [initialized] stays false, so we track these separately
@@ -72,7 +80,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
 
     override fun isInitialized() = initialized
 
-    private suspend fun start(pushAfterSync: Boolean) {
+    private suspend fun start() {
         if (!platformManager.serverSettings.permissionIntegration) {
             return
         }
@@ -87,7 +95,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         // Don't set initialized or hook unless LuckPerms is actually available.
         // Sync must never run unless we have successfully hooked into LuckPerms.
         val api = getLuckPermsOrNull() ?: run {
-            scheduleLuckPermsRetry(pushAfterSync)
+            scheduleLuckPermsRetry()
             return
         }
 
@@ -95,7 +103,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
 
         // Always run a sync, even when we were already initialized (e.g. reconnect),
         // because Pano is the source of truth and LuckPerms must be brought back in line.
-        syncLuckPermsFromPlatform(api, pushAfterSync)
+        syncLuckPermsFromPlatform(api)
 
         initialized = true
     }
@@ -107,10 +115,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         registerLuckPermsOutboundSync(api)
     }
 
-    private suspend fun syncLuckPermsFromPlatform(
-        api: net.luckperms.api.LuckPerms,
-        pushAfterSync: Boolean
-    ) {
+    private suspend fun syncLuckPermsFromPlatform(api: net.luckperms.api.LuckPerms) {
         // LuckPerms .join() calls are blocking. Never run them on the Vert.x event loop or the
         // server can appear to freeze while WebSocket / ticks stall behind a long critical section.
         withContext(Dispatchers.IO) {
@@ -132,6 +137,11 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
                 val groupNameById = permissions.groups.associate { it.id to it.name }
                 val backendGroupNames = permissions.groups.map { it.name }.toSet()
                 val backendTrackNames = permissions.tracks.map { it.name }.toSet()
+                val backendUserNames = permissions.nodes
+                    .asSequence()
+                    .filter { it.holderType == PanoPermissionNode.Companion.HolderType.USER }
+                    .mapNotNull { permissions.usernameMap[it.holderId] }
+                    .toSet()
 
                 val state = loadLuckPermsSyncState()
 
@@ -153,12 +163,14 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
                 syncLuckPermsUsers(
                     api = api,
                     permissions = permissions,
-                    groupNameById = groupNameById
+                    groupNameById = groupNameById,
+                    state = state
                 )
 
                 // Delete only what we have managed before
                 deleteMissingManagedGroups(api, state, backendGroupNames)
                 deleteMissingManagedTracks(api, state, backendTrackNames)
+                deleteMissingManagedUsers(api, state, backendUserNames)
 
                 saveLuckPermsSyncState(state)
 
@@ -170,11 +182,6 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             }
         }
 
-        // After applying Pano -> LuckPerms, push LuckPerms -> Pano so that any LP-only
-        // groups/users/permissions get registered on the Pano side as well.
-        if (pushAfterSync) {
-            schedulePostSyncPushback()
-        }
         }
     }
 
@@ -189,6 +196,15 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         resetLuckPermsWarningLogDedupe()
     }
 
+    override fun onEnable() {
+        panoPluginMain.registerEventListeners(setOf(playerJoinListener))
+    }
+
+    override fun onDisable() {
+        panoPluginMain.unregisterEventListeners(setOf(playerJoinListener))
+        stop()
+    }
+
     private fun stop() {
         val wasInitialized = initialized
         if (wasInitialized) {
@@ -197,8 +213,6 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
 
         pushSnapshotJob?.cancel()
         pushSnapshotJob = null
-        postSyncPushJob?.cancel()
-        postSyncPushJob = null
         lpRetryJob?.cancel()
         lpRetryJob = null
         lpSubscriptions.forEach { sub ->
@@ -206,7 +220,6 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         }
         lpSubscriptions.clear()
         lpOutboundRegistered = false
-        lpUsersBootstrapped = false
 
         initialized = false
         synchronized(this) {
@@ -214,10 +227,23 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         }
     }
 
+    private fun rememberJoinedPlayer(playerData: EventHelper.Companion.PlayerData) {
+        val username = playerData.username.trim()
+        if (username.isBlank()) return
+
+        currentPlayerUuidByUsername[usernameKey(username)] = playerData.uuid
+
+        if (!isPermissionIntegrationEnabled()) return
+
+        CoroutineScope(pano.vertx.dispatcher()).launch {
+            reconcileLuckPermsPlayerIdentity(username, playerData.uuid)
+        }
+    }
+
     override fun onConnectionEstablished(webSocket: WebSocket?) {
         if (platformManager.serverSettings.permissionIntegration) {
             CoroutineScope(pano.vertx.dispatcher()).launch {
-                start(pushAfterSync = true)
+                start()
             }
             return
         }
@@ -229,19 +255,14 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         // Cancel any pending outbound pushes; they would fail on a dead socket.
         pushSnapshotJob?.cancel()
         pushSnapshotJob = null
-        postSyncPushJob?.cancel()
-        postSyncPushJob = null
         lpRetryJob?.cancel()
         lpRetryJob = null
-        // Force full LP user enumeration on next reconnect so any offline LP users
-        // pick up again on the push side.
-        lpUsersBootstrapped = false
     }
 
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
         if (serverSettings.permissionIntegration) {
             CoroutineScope(pano.vertx.dispatcher()).launch {
-                start(pushAfterSync = true)
+                start()
             }
             return
         }
@@ -255,13 +276,26 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         // Don't push back after a remote snapshot update: the update came from Pano
         // (panel or another server) and Pano already has the authoritative state.
         CoroutineScope(pano.vertx.dispatcher()).launch {
-            start(pushAfterSync = false)
+            start()
+        }
+    }
+
+    private fun usernameKey(username: String): String {
+        return username.lowercase(Locale.ROOT)
+    }
+
+    private fun isPermissionIntegrationEnabled(): Boolean {
+        return try {
+            platformManager.serverSettings.permissionIntegration
+        } catch (_: UninitializedPropertyAccessException) {
+            false
         }
     }
 
     private data class LuckPermsSyncState(
         val managedGroups: MutableSet<String> = mutableSetOf(),
-        val managedTracks: MutableSet<String> = mutableSetOf()
+        val managedTracks: MutableSet<String> = mutableSetOf(),
+        val managedUsers: MutableMap<String, String> = mutableMapOf()
     )
 
     private val syncStateFile: File by lazy {
@@ -273,11 +307,30 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             if (!syncStateFile.exists()) return LuckPermsSyncState()
             val text = syncStateFile.readText(Charsets.UTF_8).trim()
             if (text.isBlank()) return LuckPermsSyncState()
-            Pano.gson.fromJson(text, LuckPermsSyncState::class.java) ?: LuckPermsSyncState()
+            val obj = JsonObject(text)
+            LuckPermsSyncState(
+                managedGroups = obj.getJsonArray("managedGroups").toStringSet(),
+                managedTracks = obj.getJsonArray("managedTracks").toStringSet(),
+                managedUsers = obj.getJsonObject("managedUsers").toStringMap()
+            )
         } catch (e: Exception) {
             logger.warning(panoPluginMain.translateColor("&eLuckPerms sync state could not be read: ${e.message}"))
             LuckPermsSyncState()
         }
+    }
+
+    private fun JsonArray?.toStringSet(): MutableSet<String> {
+        return this?.mapNotNull { it as? String }?.toMutableSet() ?: mutableSetOf()
+    }
+
+    private fun JsonObject?.toStringMap(): MutableMap<String, String> {
+        val result = mutableMapOf<String, String>()
+        this?.map?.forEach { (key, value) ->
+            if (key.isNotBlank() && value != null) {
+                result[key] = value.toString()
+            }
+        }
+        return result
     }
 
     private fun saveLuckPermsSyncState(state: LuckPermsSyncState) {
@@ -285,7 +338,11 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             if (!syncStateFile.parentFile.exists()) {
                 syncStateFile.parentFile.mkdirs()
             }
-            syncStateFile.writeText(Pano.gson.toJson(state), Charsets.UTF_8)
+            val obj = JsonObject()
+                .put("managedGroups", JsonArray(state.managedGroups.toList()))
+                .put("managedTracks", JsonArray(state.managedTracks.toList()))
+                .put("managedUsers", JsonObject(state.managedUsers.mapValues { it.value }))
+            syncStateFile.writeText(obj.encode(), Charsets.UTF_8)
         } catch (e: Exception) {
             logger.warning(panoPluginMain.translateColor("&eLuckPerms sync state could not be saved: ${e.message}"))
         }
@@ -350,7 +407,8 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
     private fun syncLuckPermsUsers(
         api: net.luckperms.api.LuckPerms,
         permissions: GetPermissionsMessage,
-        groupNameById: Map<Long, String>
+        groupNameById: Map<Long, String>,
+        state: LuckPermsSyncState
     ) {
         val userNodes = permissions.nodes.filter { it.holderType == PanoPermissionNode.Companion.HolderType.USER }
         val nodesByUserId = userNodes.groupBy { it.holderId }
@@ -359,19 +417,19 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             val nodes = nodesByUserId[userId].orEmpty()
             if (nodes.isEmpty()) return@forEach
 
-            val uuid = resolveLuckPermsUuid(api, username)
+            val uuid = resolveLuckPermsStorageUuid(api, username)
             if (uuid == null) {
                 logger.warning(
                     panoPluginMain.translateColor(
-                        "&eCould not resolve UUID for Pano user (empty username, holder id $userId). " +
+                        "&eCould not sync permissions for Pano user with empty username (holder id $userId). " +
                                 "Fix the player name on the platform."
                     )
                 )
                 return@forEach
             }
 
-            // loadUser creates a storage entry if one doesn't already exist, which is exactly
-            // what we want when Pano has a user that LuckPerms has never seen.
+            // LuckPerms stores users by UUID, but Pano permission sync is username-authoritative.
+            // The UUID here is only the LP storage key resolved from that username.
             val user = api.userManager.loadUser(uuid, username).join()
 
             overwriteUserData(
@@ -387,43 +445,88 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             } catch (_: Exception) {
                 // Not fatal: some storage backends don't implement this.
             }
+
+            state.managedUsers[usernameKey(username)] = uuid.toString()
         }
     }
 
     /**
-     * Resolve a stable UUID to store under in LuckPerms.
+     * Resolve the LuckPerms storage UUID for a username.
      *
-     * Order: LuckPerms cache + Mojang ([UserManager#lookupUniqueId]) when available, then
-     * [PanoPluginMain.getNeverJoinedPlayerUniqueId] so Pano can sync panel users who have
-     * never connected (or when Mojang has no public profile for the name) — same idea as
-     * offline/never-joined Bukkit players.
+     * Permission ownership is username-based: Pano's stored Minecraft UUID is deliberately not
+     * used here. LuckPerms still requires a UUID key for user storage, so we first ask LP for the
+     * username it already knows, then fall back to the server's own never-joined/offline mapping.
      */
-    private fun resolveLuckPermsUuid(
+    private fun resolveLuckPermsStorageUuid(
         api: net.luckperms.api.LuckPerms,
         username: String
     ): UUID? {
         if (username.isBlank()) return null
+        currentPlayerUuidByUsername[usernameKey(username)]?.let { return it }
+
         return try {
             val fromLp = api.userManager.lookupUniqueId(username).join()
-            if (fromLp != null) {
-                fromLp
-            } else {
-                val fallback = panoPluginMain.getNeverJoinedPlayerUniqueId(username)
+            fromLp ?: panoPluginMain.getNeverJoinedPlayerUniqueId(username)
+        } catch (_: Exception) {
+            panoPluginMain.getNeverJoinedPlayerUniqueId(username)
+        }
+    }
+
+    private suspend fun reconcileLuckPermsPlayerIdentity(username: String, currentUuid: UUID) {
+        withContext(Dispatchers.IO) {
+            val api = getLuckPermsOrNull() ?: return@withContext
+
+            val previousUuid = try {
+                api.userManager.lookupUniqueId(username).join()
+            } catch (_: Exception) {
+                null
+            }
+
+            try {
+                api.userManager.savePlayerData(currentUuid, username).join()
+            } catch (_: Exception) {
+                // Not fatal: sync can still write the user entry through loadUser/saveUser.
+            }
+
+            if (previousUuid == currentUuid) return@withContext
+
+            if (previousUuid != null) {
                 logger.info(
                     panoPluginMain.translateColor(
-                        "&7Permission sync: no Mojang/LP UUID for &f'$username'&7, using server offline-style id &7(${fallback})&7 so LuckPerms can be updated before first join."
+                        "&7Permission sync: detected UUID change for &f'$username'&7 " +
+                                "($previousUuid -> $currentUuid), rewriting LuckPerms user data from Pano."
                     )
                 )
-                fallback
             }
-        } catch (_: Exception) {
-            val fallback = panoPluginMain.getNeverJoinedPlayerUniqueId(username)
+
+            if (initialized && isPermissionIntegrationEnabled()) {
+                start()
+            }
+
+            if (previousUuid != null && previousUuid != currentUuid) {
+                deleteManagedLuckPermsUser(api, previousUuid, username)
+            }
+        }
+    }
+
+    private fun deleteManagedLuckPermsUser(api: net.luckperms.api.LuckPerms, uuid: UUID, username: String) {
+        try {
+            val staleUser = api.userManager.loadUser(uuid).join() ?: return
+            if (!userIsMarkedManaged(staleUser)) return
+
+            staleUser.data().clear()
+            api.userManager.saveUser(staleUser).join()
             logger.info(
                 panoPluginMain.translateColor(
-                    "&7Permission sync: could not look up &f'$username'&7; using server offline-style id &7(${fallback})&7."
+                    "&7Permission sync: cleared stale Pano-managed LuckPerms user for &f'$username'&7 ($uuid)."
                 )
             )
-            fallback
+        } catch (e: Exception) {
+            logger.warning(
+                panoPluginMain.translateColor(
+                    "&eCould not remove stale LuckPerms user for '$username' ($uuid): ${e.message}"
+                )
+            )
         }
     }
 
@@ -442,6 +545,33 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             .forEach { lpNode -> user.data().add(lpNode) }
 
         api.userManager.saveUser(user).join()
+    }
+
+    private fun userIsMarkedManaged(user: User): Boolean {
+        return user.distinctNodes.any { isPanoManagedMarker(it) }
+    }
+
+    private fun deleteMissingManagedUsers(
+        api: net.luckperms.api.LuckPerms,
+        state: LuckPermsSyncState,
+        backendUserNames: Set<String>
+    ) {
+        val backendKeys = backendUserNames.map { usernameKey(it) }.toSet()
+        val iterator = state.managedUsers.iterator()
+        while (iterator.hasNext()) {
+            val (username, uuidText) = iterator.next()
+            if (backendKeys.contains(username)) continue
+
+            val uuid = try {
+                UUID.fromString(uuidText)
+            } catch (_: Exception) {
+                iterator.remove()
+                continue
+            }
+
+            deleteManagedLuckPermsUser(api, uuid, username)
+            iterator.remove()
+        }
     }
 
     private fun deleteMissingManagedGroups(
@@ -617,31 +747,14 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         }
     }
 
-    private fun schedulePostSyncPushback() {
-        postSyncPushJob?.cancel()
-        postSyncPushJob = CoroutineScope(pano.vertx.dispatcher()).launch {
-            // Wait past the trailing suppression window + give LuckPerms a moment to persist saves.
-            delay(4_000L)
-            if (syncInProgress) return@launch
-            try {
-                pushLuckPermsSnapshotToPlatform()
-                logger.info("&2LuckPerms state synchronized back to Pano.".colorize())
-            } catch (e: Exception) {
-                logger.warning(panoPluginMain.translateColor("&eFailed to push LuckPerms state to Pano: ${e.message}"))
-            }
-        }
-    }
-
     /**
      * Push a *full* snapshot to the platform DB.
      *
      * Behaviour:
-     * - Groups, tracks, and group nodes are taken from LuckPerms (authoritative for groups).
-     * - User nodes are taken from LuckPerms for every user LuckPerms knows about, so that any
-     *   user added directly in LuckPerms (editor/command) is mirrored to Pano.
-     * - User nodes whose username is *not* present in LuckPerms (typically Pano-only users whose
-     *   Minecraft UUID could not be resolved yet) are preserved from the backend snapshot so
-     *   they are not lost to the platform's truncate-and-replace.
+     * - Groups, tracks, and group nodes are taken from LuckPerms after LP runtime changes.
+     * - User nodes are taken from LuckPerms for currently loaded users and mapped by username.
+     * - Pano-only user nodes are preserved from the backend snapshot so they are not lost to the
+     *   platform's truncate-and-replace.
      */
     private suspend fun pushLuckPermsSnapshotToPlatform() {
         withContext(Dispatchers.IO) {
@@ -707,7 +820,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
                     }
             }
 
-        // All LP users we know about on this server (online + offline when bootstrapping).
+            // Runtime LP changes are captured from users LuckPerms has loaded for the event/command.
         val lpUsers = collectLuckPermsUsersForSnapshot(api)
         val usernamesInLp = lpUsers.mapNotNull { it.username }.toSet()
 
@@ -724,7 +837,6 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
                         .put("holderType", "USER")
                         .put("holderId", -1)
                         .put("holderName", username)
-                        .put("holderUniqueId", user.uniqueId.toString())
                         .put("node", node.key)
                         .put("active", node.value)
                         .put("context", ctx.map)
@@ -769,46 +881,11 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
     /**
      * Return LuckPerms users to include in a full-snapshot push.
      *
-     * On the first push after a (re)connect we enumerate every stored LuckPerms user so that
-     * offline LP-only users (who have never been loaded on this server) are registered in Pano.
-     * Subsequent pushes only include currently-loaded users - offline ones are preserved from the
-     * backend snapshot in [pushLuckPermsSnapshotToPlatform].
+     * Startup and reconnect syncs are Pano -> LuckPerms only. LuckPerms -> Pano runs in response
+     * to LP runtime events, where the changed user is expected to be loaded by LuckPerms already.
      */
     private suspend fun collectLuckPermsUsersForSnapshot(api: net.luckperms.api.LuckPerms): List<User> {
-        if (lpUsersBootstrapped) {
-            return api.userManager.loadedUsers.toList()
-        }
-
-        val users = try {
-            val uniqueUsers = api.userManager.uniqueUsers.join()
-            val accumulator = mutableListOf<User>()
-            var index = 0
-            for (uuid in uniqueUsers) {
-                if (index > 0 && index % 32 == 0) {
-                    // Avoid monopolising the server / storage layer during large LP databases.
-                    yield()
-                }
-                index++
-                try {
-                    val user = api.userManager.loadUser(uuid).join() ?: continue
-                    accumulator.add(user)
-                } catch (_: Exception) {
-                    // Skip users we can't load; they'll be picked up on next mutation/load.
-                }
-            }
-            accumulator
-        } catch (e: Exception) {
-            logger.warning(
-                panoPluginMain.translateColor(
-                    "&eFailed to enumerate LuckPerms users (${e.message}). " +
-                            "Falling back to currently-loaded users for this push."
-                )
-            )
-            api.userManager.loadedUsers.toList()
-        }
-
-        lpUsersBootstrapped = true
-        return users
+        return api.userManager.loadedUsers.toList()
     }
 
     private fun isPanoManagedMarker(node: Node): Boolean {
@@ -852,7 +929,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
         }
     }
 
-    private fun scheduleLuckPermsRetry(pushAfterSync: Boolean) {
+    private fun scheduleLuckPermsRetry() {
         if (!platformManager.serverSettings.permissionIntegration) return
         if (lpRetryJob?.isActive == true) return
 
@@ -861,7 +938,7 @@ class PermissionIntegration(override val panoPluginMain: PanoPluginMain) : Integ
             delay(5000L)
             if (!platformManager.serverSettings.permissionIntegration) return@launch
             try {
-                start(pushAfterSync)
+                start()
             } catch (_: Exception) {
                 // start() already logs and will reschedule if needed
             }
