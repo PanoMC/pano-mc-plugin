@@ -9,6 +9,7 @@
   ],
   "url": "https://panomc.com",
   "dependencies": [
-    { "id": "luckperms", "optional": true }
+    { "id": "luckperms", "optional": true },
+    { "id": "limboauth", "optional": true }
   ]
 }

@@ -16,6 +16,10 @@ dependencies {
     // velocity
     compileOnly("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
     annotationProcessor("com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")
+
+    // pano-limbo-auth fork (JitPack). Compile-time only: LimboAuth is a runtime soft-dependency
+    // declared in velocity-plugin.json. The jitpack repo is provided by the root allprojects block.
+    compileOnly("com.github.PanoMC:pano-limbo-auth:master-SNAPSHOT")
 }
 
 kotlin {

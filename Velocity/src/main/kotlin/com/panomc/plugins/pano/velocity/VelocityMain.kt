@@ -11,6 +11,7 @@ import com.panomc.plugins.pano.core.integration.PermissionIntegration
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage
 import com.panomc.plugins.pano.core.util.LegacyColorConverter
+import com.panomc.plugins.pano.velocity.integration.LimboAuthIntegration
 import com.velocitypowered.api.command.CommandMeta
 import com.velocitypowered.api.event.Subscribe
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent
@@ -40,6 +41,7 @@ class VelocityMain : PanoPluginMain {
         listOf(
             PermissionIntegration(this),
             BanIntegration(this),
+            LimboAuthIntegration(this),
         )
     }
 
@@ -76,6 +78,8 @@ class VelocityMain : PanoPluginMain {
     override fun getPanoLogger(): Logger = logger
 
     override fun getPano(): Pano = mPano
+
+    internal fun getServer(): ProxyServer = server
 
     private fun onEnable() {
         integrations.forEach { it.onEnable() }
