@@ -23,7 +23,9 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(8)
+    // Bungeecord shades in Core, which shades in Vert.x 5 (Java-11-only, class file major 55);
+    // Java 8 bytecode here let that mismatch load fine and only blow up once Vert.x code actually ran.
+    jvmToolchain(11)
 }
 
 tasks.test {

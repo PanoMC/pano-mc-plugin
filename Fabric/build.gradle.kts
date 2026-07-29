@@ -93,6 +93,16 @@ tasks {
         mergeServiceFiles()
         relocate("com.fasterxml.jackson", "com.panomc.shadow.jackson")
         relocate("io.netty", "vertx.io.netty")
+        // Fabric's Knot classloader is flat across every mod jar (unlike Bukkit/Bungee/Velocity,
+        // which give each plugin its own classloader), so an unrelocated kotlin/kotlinx/gson/
+        // spring/vertx/handlebars here collides with any other mod bundling the same libraries —
+        // whichever mod's classes Knot resolves first wins for everyone (core-misc-10).
+        relocate("kotlin.", "com.panomc.shadow.kotlin.")
+        relocate("kotlinx.", "com.panomc.shadow.kotlinx.")
+        relocate("com.google.gson", "com.panomc.shadow.gson")
+        relocate("org.springframework", "com.panomc.shadow.springframework")
+        relocate("io.vertx", "com.panomc.shadow.vertx")
+        relocate("com.github.jknack", "com.panomc.shadow.handlebars")
 
         archiveClassifier.set("")
         archiveFileName.set("${rootProject.name}-fabric-${version}.jar")

@@ -43,13 +43,19 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(8)
+    // Core shades in Vert.x 5, which is Java-11-only (class file major 55); Java 8 bytecode here
+    // let that mismatch load fine and only blow up once Vert.x code actually ran.
+    jvmToolchain(11)
 }
 
 tasks.test {
     useJUnitPlatform()
 }
 
+// Core's plain jar must stay enabled: Spigot/Bungeecord/Velocity consume it directly via
+// implementation(project(":Core")), which resolves this task's output, not the shadow jar
+// (only Fabric uses the "shadow" configuration). Core is kept out of GitHub release assets
+// via .releaserc.json instead of disabling this task.
 tasks {
     build {
         dependsOn(shadowJar)
@@ -75,7 +81,9 @@ tasks {
         relocate("com.fasterxml.jackson", "com.panomc.shadow.jackson")
         relocate("io.netty", "vertx.io.netty")
 
-        archiveFileName.set("${rootProject.name}-${version}.jar")
+        // Named distinctly from "${rootProject.name}-${version}.jar" so it can't be mistaken for an
+        // installable platform plugin jar (it has no plugin descriptor of any kind).
+        archiveFileName.set("${rootProject.name}-core-${version}.jar")
 
         if (project.gradle.startParameter.taskNames.contains("publish")) {
             archiveFileName.set(archiveFileName.get().lowercase())
