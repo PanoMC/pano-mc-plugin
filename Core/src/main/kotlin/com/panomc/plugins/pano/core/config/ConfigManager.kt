@@ -3,6 +3,7 @@ package com.panomc.plugins.pano.core.config
 import com.panomc.plugins.pano.core.config.migration.ConfigMigration1To2
 import com.panomc.plugins.pano.core.config.migration.ConfigMigration2To3
 import com.panomc.plugins.pano.core.config.migration.ConfigMigration3To4
+import com.panomc.plugins.pano.core.config.migration.ConfigMigration4To5
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 import com.typesafe.config.ConfigRenderOptions
@@ -193,7 +194,8 @@ class ConfigManager(vertx: Vertx, private val logger: Logger, dataFolder: File) 
     private val migrations = listOf<ConfigMigration>(
         ConfigMigration1To2(),
         ConfigMigration2To3(),
-        ConfigMigration3To4()
+        ConfigMigration3To4(),
+        ConfigMigration4To5()
     )
 
     private val configFile = File(dataFolder.path + "/config.conf")

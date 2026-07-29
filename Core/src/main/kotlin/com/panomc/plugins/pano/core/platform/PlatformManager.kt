@@ -20,6 +20,7 @@ import com.panomc.plugins.pano.core.util.Aes256GcmUtil
 import com.panomc.plugins.pano.core.util.EncryptUtil
 import com.panomc.plugins.pano.core.util.ImageUtil
 import io.vertx.core.Vertx
+import io.vertx.core.buffer.Buffer
 import io.vertx.core.http.*
 import io.vertx.core.json.JsonObject
 import io.vertx.ext.web.client.HttpResponse
@@ -49,6 +50,11 @@ private data class PendingRequest(
 private enum class ConnectOutcome {
     CONNECTED, RETRY, ABORT
 }
+
+// Resolved (and already-validated) heartbeat cadence for the currently active connection, in
+// milliseconds so it drops straight into vertx.setPeriodic and elapsed-time comparisons
+// (platform-core-heartbeat).
+private data class HeartbeatSettings(val intervalMillis: Long, val timeoutMillis: Long)
 
 class PlatformManager(
     private val vertx: Vertx,
@@ -82,6 +88,37 @@ class PlatformManager(
     // new reconnect loop on top of the one already retrying, doubling on every recurrence
     // (platform-core-XX).
     private val connecting = AtomicBoolean(false)
+
+    // Vert.x timer id for the periodic ping heartbeat that keeps the socket non-idle behind a
+    // reverse proxy (nginx's default 60s proxy_read_timeout otherwise kills an idle upgraded
+    // connection) and lets us notice a dead peer without waiting on a TCP-level timeout. Null
+    // whenever no heartbeat is currently running. @Volatile: started on the event loop at the
+    // end of establishConnectionToPlatform, cancelled from the event loop on every path that
+    // ends the connection (onWebSocketClosed, closeConnection, stop, a heartbeat-detected
+    // death) and read back by the periodic callback itself (platform-core-heartbeat).
+    @Volatile
+    private var heartbeatTimerId: Long? = null
+
+    // Vert.x timer id for the one-shot "is the peer still there" deadline, rescheduled every time
+    // a pong comes in (see scheduleDeathWatchdog). Kept separate from heartbeatTimerId above so
+    // the ping cadence (intervalMillis, needed to keep the socket non-idle behind nginx) and the
+    // death-detection deadline (anchored to the actual last pong, needed to bound worst-case
+    // detection latency) can no longer be coupled to the same tick
+    // (platform-core-heartbeat-detect). @Volatile / null-when-idle / cancellation discipline all
+    // mirror heartbeatTimerId exactly.
+    @Volatile
+    private var deathWatchdogTimerId: Long? = null
+
+    // Epoch millis of the last pong received for the CURRENTLY active socket. Seeded to "now"
+    // the instant the heartbeat starts (before the pongHandler or the death watchdog's first
+    // timer can run) so the first interval can never look like an instant timeout before a
+    // single ping has had a chance to round-trip (platform-core-heartbeat). @Volatile: written
+    // from the pongHandler and read from the death watchdog's timer callback (for the elapsed-time
+    // log line - the watchdog's own fire instant, not this field, is what actually decides the
+    // peer is dead, see scheduleDeathWatchdog) - two different Handler instances even though both
+    // happen to run on the same Vert.x context.
+    @Volatile
+    private var lastPongReceivedAt: Long = 0
 
     // ConcurrentHashMap because entries are written from whatever thread calls
     // sendMessageAwaitResponse (game/auth threads, Dispatchers.IO) and read/removed from the
@@ -265,6 +302,13 @@ class PlatformManager(
 
     suspend fun stop() {
         canConnect = false
+
+        // Belt-and-braces: closeConnection() below also cancels the heartbeat, but stop() can
+        // return before ever reaching it (isPlatformConfigured() == false) - listed as its own
+        // path to cancel on regardless of what closeConnection ends up doing
+        // (platform-core-heartbeat). Cancelling an already-stopped/never-started timer is a
+        // harmless no-op.
+        cancelHeartbeat()
 
         // Fail everything still parked in sendMessageAwaitResponse instead of leaving those
         // callers awaiting forever (platform-core-2).
@@ -575,6 +619,12 @@ class PlatformManager(
             // wired up (platform-core-7). Tear the half-open connection down and retry instead.
             logger.severe(pluginMain.translateColor("&cError: Failed to finish connecting to Pano Platform. Reason: ${exception.message}"))
 
+            // The heartbeat only ever starts AFTER onConnectionEstablished() returns
+            // successfully (below), so this is a no-op today - kept anyway since this is exactly
+            // the "deliberate teardown" path the heartbeat's timer discipline must cover
+            // regardless of where in the method it failed (platform-core-heartbeat).
+            cancelHeartbeat()
+
             // Detach the handlers before this deliberate close - otherwise close() synchronously
             // drives the closeHandler into onWebSocketClosed(), which (seeing canConnect == true)
             // would spin up a second reconnect loop on top of the one already retrying here
@@ -591,6 +641,11 @@ class PlatformManager(
 
             return ConnectOutcome.RETRY
         }
+
+        // Only after the handshake (OnServerConnectRequest + GetServerSettings) has actually
+        // completed - starting any earlier would let the periodic ping/timeout race the
+        // handshake itself (platform-core-heartbeat).
+        startHeartbeat(webSocket)
 
         return ConnectOutcome.CONNECTED
     }
@@ -684,6 +739,11 @@ class PlatformManager(
     }
 
     private fun onWebSocketClosed() {
+        // Covers both a remote/network-initiated drop and a heartbeat-detected death (which
+        // closes the socket itself to get here) - either way, the timer belongs to a socket that
+        // is gone now (platform-core-heartbeat).
+        cancelHeartbeat()
+
         webSocket = null
 
         // Fail everything still parked in sendMessageAwaitResponse instead of leaving those
@@ -712,7 +772,191 @@ class PlatformManager(
     }
 
     private suspend fun closeConnection() {
+        // Cancel before the close even completes - closeHandler/onWebSocketClosed will cancel
+        // again once it fires (harmless no-op), but this rules out the periodic timer sneaking
+        // in one more tick against a socket that's already on its way out
+        // (platform-core-heartbeat).
+        cancelHeartbeat()
+
         webSocket?.close()?.coAwait()
+    }
+
+    // Reads platform.config's heartbeat-interval/heartbeat-timeout and validates them, instead
+    // of trusting a hand-edited config.conf outright: an interval <= 0 would spin
+    // vertx.setPeriodic uselessly (or throw), and a timeout that isn't comfortably larger than
+    // the interval would start declaring a perfectly healthy connection dead after little more
+    // than a single missed pong. Falls back to PanoConfig's shipped defaults with a warning
+    // rather than heartbeating a good connection to death (platform-core-heartbeat).
+    private fun resolveHeartbeatSettings(): HeartbeatSettings {
+        val config = configManager.config
+        val configuredInterval = config.heartbeatInterval
+        val configuredTimeout = config.heartbeatTimeout
+
+        val configuredIntervalMillis = TimeUnit.SECONDS.toMillis(configuredInterval.toLong())
+        val configuredTimeoutMillis = TimeUnit.SECONDS.toMillis(configuredTimeout.toLong())
+
+        // The third condition is the one that is easy to miss: scheduleDeathWatchdog subtracts a
+        // fixed close-handshake budget from the timeout, so the deadline an operator actually gets
+        // is (timeout - budget), not timeout. Requiring at least two intervals of room AFTER that
+        // subtraction guarantees a healthy connection always has a full interval of slack to land
+        // its next pong and reschedule the watchdog. Without it, timeout >= 2 * interval alone
+        // still admits e.g. 5s/10s, where the watchdog would fire at exactly the instant the next
+        // pong is due - a coin flip that declares a perfectly healthy connection dead and puts the
+        // plugin into a self-inflicted reconnect loop.
+        if (configuredInterval <= 0 ||
+            configuredTimeout < configuredInterval * 2 ||
+            configuredTimeoutMillis - CLOSE_HANDSHAKE_BUDGET_MILLIS < configuredIntervalMillis * 2
+        ) {
+            logger.warning(
+                pluginMain.translateColor(
+                    "&eInvalid heartbeat-interval/heartbeat-timeout in config.conf (interval must be greater than 0, and timeout must be at least twice the interval plus ${CLOSE_HANDSHAKE_BUDGET_MILLIS / 1000}s of close-handshake budget). Falling back to the defaults: ${PanoConfig.DEFAULT_HEARTBEAT_INTERVAL_SECONDS}s / ${PanoConfig.DEFAULT_HEARTBEAT_TIMEOUT_SECONDS}s."
+                )
+            )
+
+            return HeartbeatSettings(
+                TimeUnit.SECONDS.toMillis(PanoConfig.DEFAULT_HEARTBEAT_INTERVAL_SECONDS.toLong()),
+                TimeUnit.SECONDS.toMillis(PanoConfig.DEFAULT_HEARTBEAT_TIMEOUT_SECONDS.toLong())
+            )
+        }
+
+        return HeartbeatSettings(
+            TimeUnit.SECONDS.toMillis(configuredInterval.toLong()),
+            TimeUnit.SECONDS.toMillis(configuredTimeout.toLong())
+        )
+    }
+
+    // Starts the ping/pong heartbeat for `socket`, called once establishConnectionToPlatform's
+    // handshake (OnServerConnectRequest + GetServerSettings, done in onConnectionEstablished) has
+    // fully completed. Keeps the connection non-idle behind a reverse proxy (nginx's default 60s
+    // proxy_read_timeout otherwise kills an idle upgraded connection) and lets us notice a dead
+    // peer without waiting on a TCP-level timeout. Purely protocol-level (ping/pong frames) -
+    // does not touch the AES-256-GCM message encryption path (platform-core-heartbeat).
+    private fun startHeartbeat(socket: WebSocket) {
+        val settings = resolveHeartbeatSettings()
+
+        // Seed before the pongHandler, the ping timer or the death watchdog can possibly run, so
+        // the very first interval can never look like an instant timeout before a single ping has
+        // had a chance to round-trip (platform-core-heartbeat).
+        lastPongReceivedAt = System.currentTimeMillis()
+
+        socket.pongHandler {
+            // Same socket-identity guard the closeHandler in establishConnectionToPlatform uses -
+            // a pong for a socket that has since been replaced by a newer connection must not
+            // refresh the new connection's liveness clock (platform-core-heartbeat).
+            if (this.webSocket === socket) {
+                lastPongReceivedAt = System.currentTimeMillis()
+
+                // Every fresh pong pushes the death deadline back out - this is what lets a
+                // healthy connection run indefinitely without ever tripping the watchdog
+                // (platform-core-heartbeat-detect).
+                scheduleDeathWatchdog(socket, settings)
+            }
+        }
+
+        // Ping cadence only from here on - liveness is decided solely by the death watchdog
+        // below, on its own schedule anchored to the actual last pong. Quantising death-detection
+        // to a multiple of intervalMillis (as a single combined tick used to do) is exactly the
+        // bug this split fixes: it let a peer that died right after a pong hide for up to one
+        // extra full interval past the configured timeout (platform-core-heartbeat-detect).
+        heartbeatTimerId = vertx.setPeriodic(settings.intervalMillis) { timerId ->
+            // Inert once the socket this timer was started for is gone - closed, replaced by a
+            // newer connection, or a stale timer that outlived a cancel race. Mirrors the
+            // closeHandler's identity check in establishConnectionToPlatform (platform-core-heartbeat).
+            if (this.webSocket !== socket) {
+                vertx.cancelTimer(timerId)
+
+                return@setPeriodic
+            }
+
+            try {
+                socket.writePing(Buffer.buffer())
+            } catch (exception: Exception) {
+                // writePing throws against an already-closed/broken socket - treat that the same
+                // as a missed pong instead of letting it escape the periodic callback
+                // (platform-core-heartbeat).
+                logger.warning(pluginMain.translateColor("&eFailed to send heartbeat ping to Pano Platform. Reason: ${exception.message}"))
+
+                killHeartbeatConnection(socket)
+            }
+        }
+
+        scheduleDeathWatchdog(socket, settings)
+    }
+
+    // (Re)schedules the single one-shot timer that actually decides the peer is dead, replacing
+    // whatever watchdog timer was already pending for this heartbeat. Called once from
+    // startHeartbeat (seeding the very first deadline) and then again on every pongHandler
+    // invocation, so the fire instant is always settings.timeoutMillis minus
+    // CLOSE_HANDSHAKE_BUDGET_MILLIS after the most recent pong - never quantised to a multiple of
+    // the ping interval the way a shared ping/check tick was. This is what bounds worst-case
+    // detection to the configured heartbeat-timeout instead of up to timeout + intervalMillis
+    // (platform-core-heartbeat-detect).
+    //
+    // It deliberately fires before the full configured timeout has elapsed, to leave room for
+    // killHeartbeatConnection's socket.close() below: against a peer that never answers with its
+    // own close frame, close() waits out the WebSocketClient's closingTimeout before the
+    // closeHandler (and therefore the reconnect) fires. PlatformManager doesn't construct that
+    // WebSocketClient - SpringConfig.provideWebsocketClient() calls vertx.createWebSocketClient()
+    // with no options - so it runs at the library default,
+    // WebSocketClientOptions.DEFAULT_CLOSING_TIMEOUT (10s), and nothing in this file can shorten
+    // it. Carving that budget out of the watchdog delay here instead keeps
+    // detection-plus-close-handshake bounded by settings.timeoutMillis overall
+    // (platform-core-heartbeat-detect).
+    private fun scheduleDeathWatchdog(socket: WebSocket, settings: HeartbeatSettings) {
+        deathWatchdogTimerId?.let { vertx.cancelTimer(it) }
+
+        // Unreachable belt-and-braces: resolveHeartbeatSettings already rejects any config whose
+        // timeout does not leave at least two full intervals after CLOSE_HANDSHAKE_BUDGET_MILLIS
+        // is carved out, so this subtraction cannot land below intervalMillis for settings that
+        // came from it. The floor stays because vertx.setTimer rejects anything under 1ms, and a
+        // future edit to the validator should fail safe (a late watchdog) rather than turn every
+        // pong into an almost-immediate spurious "dead" verdict.
+        val delayMillis = (settings.timeoutMillis - CLOSE_HANDSHAKE_BUDGET_MILLIS)
+            .coerceAtLeast(settings.intervalMillis)
+
+        deathWatchdogTimerId = vertx.setTimer(delayMillis) {
+            // Mirrors the ping timer's identity guard - inert for a socket that is already gone
+            // or has been superseded (platform-core-heartbeat-detect).
+            if (this.webSocket !== socket) {
+                return@setTimer
+            }
+
+            val elapsedMillis = System.currentTimeMillis() - lastPongReceivedAt
+
+            logger.warning(pluginMain.translateColor("&eNo heartbeat response from Pano Platform in ${elapsedMillis}ms, treating connection as dead."))
+
+            killHeartbeatConnection(socket)
+        }
+    }
+
+    // Cancels this heartbeat's timer, then closes `socket` so the EXISTING closeHandler /
+    // onWebSocketClosed / connectPlatformTask reconnect path takes over from here - the heartbeat
+    // does not reimplement any of that (platform-core-heartbeat).
+    private fun killHeartbeatConnection(socket: WebSocket) {
+        cancelHeartbeat()
+
+        try {
+            socket.close()
+        } catch (_: Exception) {
+            // Already closing/closed - closeHandler (if it hasn't already fired) still drives
+            // onWebSocketClosed() and the reconnect loop from here regardless.
+        }
+    }
+
+    // Cancelling an already-cancelled (or never-started) timer is harmless - vertx.cancelTimer
+    // simply returns false for an unknown id - so every path that ends the connection
+    // (onWebSocketClosed, closeConnection, stop, the deliberate-teardown branch in
+    // establishConnectionToPlatform's catch, a heartbeat-detected death) can call this
+    // unconditionally without needing to know whether a heartbeat is even running
+    // (platform-core-heartbeat). Cancels both the ping-cadence timer and the death watchdog - all
+    // existing call sites stay untouched and now tear down both by calling this one function
+    // (platform-core-heartbeat-detect).
+    private fun cancelHeartbeat() {
+        heartbeatTimerId?.let { vertx.cancelTimer(it) }
+        heartbeatTimerId = null
+
+        deathWatchdogTimerId?.let { vertx.cancelTimer(it) }
+        deathWatchdogTimerId = null
     }
 
     private fun savePlatform(host: String, port: Int, ssl: Boolean, token: String, encryptionKey: String): Boolean {
@@ -849,5 +1093,16 @@ class PlatformManager(
         // (platform-core-2). Callers with a tighter budget (e.g. pre-login paths) can still wrap
         // the call in their own, shorter withTimeout.
         private val DEFAULT_RESPONSE_TIMEOUT_MILLIS = TimeUnit.SECONDS.toMillis(15)
+
+        // How long killHeartbeatConnection's socket.close() can be stuck waiting for a dead
+        // peer's own close frame before the WebSocketClient gives up and forces the TCP
+        // connection shut - i.e. WebSocketClientOptions.DEFAULT_CLOSING_TIMEOUT, since
+        // SpringConfig.provideWebsocketClient() builds that client with no options and this file
+        // has no way to override it per-connection (WebSocketConnectOptions has no equivalent
+        // setting). Subtracted from the death watchdog's delay in scheduleDeathWatchdog so
+        // detection-plus-close-handshake together still land within settings.timeoutMillis
+        // (platform-core-heartbeat-detect).
+        private val CLOSE_HANDSHAKE_BUDGET_MILLIS =
+            TimeUnit.SECONDS.toMillis(WebSocketClientOptions.DEFAULT_CLOSING_TIMEOUT.toLong())
     }
 }
