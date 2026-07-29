@@ -809,8 +809,20 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
         }
         try {
             Bukkit.getScheduler().runTask(panoPluginMain, Runnable {
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "authme reload")
-                logger.info("AuthMe configuration reloaded".colorize())
+                // dispatchCommand() returns false for an unrecognized command instead of throwing, so
+                // without checking AuthMe is actually enabled and the dispatch actually succeeded, the
+                // log below would claim success even when AuthMe was never told to re-read anything.
+                // That line is how an operator verifies the encryption hook was picked up, so it must
+                // not lie. Same guard performStop() already carries.
+                val reloaded = Bukkit.getPluginManager().isPluginEnabled("AuthMe") &&
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "authme reload")
+
+                if (reloaded) {
+                    logger.info("AuthMe configuration reloaded".colorize())
+                } else {
+                    logger.warning("Could not reload AuthMe automatically.".colorize())
+                    logger.warning("Please run '/authme reload' manually".colorize())
+                }
             })
         } catch (e: Exception) {
             logger.warning("Could not reload AuthMe automatically: ${e.message}".colorize())
