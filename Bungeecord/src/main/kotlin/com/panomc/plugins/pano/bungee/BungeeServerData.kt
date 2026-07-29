@@ -23,7 +23,9 @@ class BungeeServerData(private val plugin: Plugin) : ServerData {
 
     override fun playerCount(): Int = plugin.proxy.players.size
 
-    override fun maxPlayerCount(): Int = plugin.proxy.config.playerLimit
+    // playerLimit is BungeeCord's optional global hard cap (-1 by default, unset in most configs);
+    // the slot count BungeeCord actually advertises on the ping page is the listener's max_players.
+    override fun maxPlayerCount(): Int = plugin.proxy.config.listeners.firstOrNull()?.maxPlayers ?: plugin.proxy.config.playerLimit
 
     override fun favicon(): BufferedImage? {
         val iconFile = File(plugin.dataFolder.parentFile.parentFile, "server-icon.png")

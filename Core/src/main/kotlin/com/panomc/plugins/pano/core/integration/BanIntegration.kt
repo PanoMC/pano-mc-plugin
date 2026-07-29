@@ -64,7 +64,9 @@ class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration 
                         dateTime.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
                     }
 
-                    val message = i18nManager.translate(playerInfo, key, mapOf("reason" to playerInfo.banReason, "untilTime" to formattedBannedUntil))!!
+                    // translate() never returns null (core-misc-5): a missing key must not abort
+                    // this handler before disallow() runs, or the ban check fails open.
+                    val message = i18nManager.translate(playerInfo, key, mapOf("reason" to playerInfo.banReason, "untilTime" to formattedBannedUntil))
 
                     eventHelper.disallow(event, message)
                 }

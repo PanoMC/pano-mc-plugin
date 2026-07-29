@@ -18,7 +18,9 @@ class ConfigMigration1To2 : ConfigMigration(1, 2, "Convert access_token to acces
         config.put("public-key", publicKey)
         config.put("private-key", privateKey)
 
-        val platformConfig = config.getJsonObject("platform")
+        // "platform" is optional / may be missing on a hand-edited config; ConfigMigration3To4
+        // guards the same access the same way — mirror it instead of NPE-ing on the `put`.
+        val platformConfig = config.getJsonObject("platform") ?: JsonObject().also { config.put("platform", it) }
         platformConfig.put("encryption-key", "")
     }
 }

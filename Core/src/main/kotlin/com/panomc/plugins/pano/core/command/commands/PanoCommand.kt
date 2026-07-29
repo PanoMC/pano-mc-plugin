@@ -5,10 +5,15 @@ import com.panomc.plugins.pano.core.helper.CommandHelper
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformManager
 import java.io.Console
+import java.util.logging.Level
+import java.util.logging.Logger
 
 @Command
 class PanoCommand(
-    private val platformManager: PlatformManager
+    private val platformManager: PlatformManager,
+    // CommandManager constructs this directly (not through Spring), so keep this defaulted
+    // rather than widening the constructor's required parameters.
+    private val logger: Logger = Logger.getLogger(PanoCommand::class.java.name)
 ) : com.panomc.plugins.pano.core.command.Command {
     override val name: String = "Pano"
     override val permission: String = "pano.admin"
@@ -68,7 +73,16 @@ class PanoCommand(
 
             return true
         } catch (exception: Exception) {
-            exception.printStackTrace()
+            // connectNewPlatform can throw plain exceptions after the HTTP call already
+            // succeeded (e.g. a stale private-key/public-key pair failing to decrypt the
+            // response). Previously this branch sent nothing, leaving the sender stuck at
+            // "Connecting..." with only a console stack trace to go on (core-misc-14).
+            logger.log(Level.SEVERE, "Failed to connect to platform", exception)
+
+            commandHelper.sendMessage(
+                commandSender,
+                "&cConnection failed: ${exception.message ?: exception::class.java.simpleName}. See console for details."
+            )
 
             return true
         }
@@ -101,9 +115,14 @@ class PanoCommand(
         try {
             platformManager.disconnectPlatform()
         } catch (exception: Exception) {
+            // disconnectPlatform can throw non-PanoError exceptions (removePlatform / config
+            // I/O / coAwait failures) whose message is null; mirror connectCommand's handling
+            // so the real reason isn't lost behind a KotlinNullPointerException (core-misc-14).
+            logger.log(Level.SEVERE, "Failed to disconnect from platform", exception)
+
             commandHelper.sendMessage(
                 commandSender,
-                exception.message!!
+                exception.message ?: exception::class.java.simpleName
             )
 
             return true

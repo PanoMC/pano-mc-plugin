@@ -3,23 +3,10 @@ main: com.panomc.plugins.pano.bungee.BungeeMain
 version: ${version}
 author: Pano MC
 description: An advanced web platform for Minecraft servers.
-website: http://panomc.com
 softDepends:
   - LuckPerms
-commands:
-  pano:
-    description: Runs Pano commands.
-    permission: pano.admin
-    permission-message: You do not have permission!
-  link:
-    description: Link your account with website.
-    default: true
-permissions:
-  pano.admin:
-    description: Allows Pano command.
-    default: op
-  pano.*:
-    description: Allows everything in Pano.
-    default: op
-    children:
-      pano.admin: true
+# BungeeCord's PluginDescription has no commands:/permissions:/website: fields (unlike Spigot's
+# plugin.yml) -- PluginManager's YAML loader silently discards anything it doesn't recognise, so
+# those blocks used to sit here dead. pano.admin (required by /pano, see Core's PanoCommand) has
+# no op concept to default to on BungeeCord: grant it in BungeeCord's own config.yml permissions:
+# section, or via LuckPerms.

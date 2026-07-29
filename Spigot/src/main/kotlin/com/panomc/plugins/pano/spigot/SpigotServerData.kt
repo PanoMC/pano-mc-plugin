@@ -6,12 +6,23 @@ import org.bukkit.plugin.java.JavaPlugin
 import java.awt.image.BufferedImage
 import java.io.File
 import java.net.InetAddress
+import java.net.UnknownHostException
 import javax.imageio.ImageIO
 
 class SpigotServerData(private val plugin: JavaPlugin) : ServerData {
     override fun serverName(): String = plugin.server.name
 
-    override fun hostAddress(): String = plugin.server.ip.ifBlank { InetAddress.getLocalHost().hostAddress }
+    // server-ip is blank in a default server.properties, so getLocalHost() is the normal path,
+    // not a rare fallback — it does a name-service lookup and throws when the machine's hostname
+    // is not resolvable (some minimal/hand-built images). Fall back to loopback rather than
+    // letting that throw escape into the connect/status-report callers.
+    override fun hostAddress(): String = plugin.server.ip.ifBlank {
+        try {
+            InetAddress.getLocalHost().hostAddress
+        } catch (_: UnknownHostException) {
+            "127.0.0.1"
+        }
+    }
 
     override fun motd(): String = plugin.server.motd
 

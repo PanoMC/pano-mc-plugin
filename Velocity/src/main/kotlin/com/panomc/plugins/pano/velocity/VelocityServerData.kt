@@ -3,7 +3,7 @@ package com.panomc.plugins.pano.velocity
 import com.panomc.plugins.pano.core.ServerType
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.velocitypowered.api.proxy.ProxyServer
-import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
@@ -13,7 +13,9 @@ class VelocityServerData(private val server: ProxyServer) : ServerData {
 
     override fun hostAddress(): String = server.boundAddress.hostString
 
-    override fun motd(): String = GsonComponentSerializer.gson().serialize(server.configuration.motd)
+    // Plain/legacy text, matching Spigot's server.motd and Bungee's ListenerInfo.motd — not the
+    // raw Adventure JSON component blob GsonComponentSerializer would produce.
+    override fun motd(): String = LegacyComponentSerializer.legacySection().serialize(server.configuration.motd)
 
     override fun port(): Int = server.boundAddress.port
 

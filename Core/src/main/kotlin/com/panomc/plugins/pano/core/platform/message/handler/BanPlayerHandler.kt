@@ -18,7 +18,17 @@ class BanPlayerHandler(
     }
 
     override suspend fun handle(response: BanPlayerMessage) {
-        if (!platformManager.serverSettings.banIntegration) {
+        // serverSettings is lateinit and only assigned after the first GET_SERVER_SETTINGS
+        // round trip; a BAN_PLAYER push arriving before that (first connect only) would
+        // otherwise throw UninitializedPropertyAccessException here and silently drop the kick
+        // (integrations-22). Mirrors PermissionIntegration.isPermissionIntegrationEnabled().
+        val banIntegrationEnabled = try {
+            platformManager.serverSettings.banIntegration
+        } catch (_: UninitializedPropertyAccessException) {
+            false
+        }
+
+        if (!banIntegrationEnabled) {
             return
         }
 
@@ -36,8 +46,14 @@ class BanPlayerHandler(
             dateTime.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
         }
 
-        val message = i18nManager.translate(response.locale, key, mapOf("reason" to response.banReason, "untilTime" to formattedBannedUntil))!!
+        // translate() never returns null (core-misc-5): a missing key must not abort this
+        // handler before kickPlayer() runs, or a live ban push is silently dropped.
+        val message = i18nManager.translate(response.locale, key, mapOf("reason" to response.banReason, "untilTime" to formattedBannedUntil))
 
-        pluginMain.kickPlayer(response.username, pluginMain.translateColor(message))
+        // Pass the raw '&'-coded string: kickPlayer() implementations do their own color
+        // conversion, and pre-translating here double-converts on platforms whose conversion isn't
+        // idempotent (Velocity's translateColor() emits ANSI escapes, which its kickPlayer() then
+        // fails to parse as legacy-ampersand codes).
+        pluginMain.kickPlayer(response.username, message)
     }
 }
