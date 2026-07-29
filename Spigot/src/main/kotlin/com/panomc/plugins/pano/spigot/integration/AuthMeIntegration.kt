@@ -310,6 +310,19 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
 
             registerEvents()
             eventsRegistered = true
+
+            // AuthMe resolves its EncryptionMethod ONCE, inside its own reload(), by firing
+            // PasswordEncryptionEvent - and for passwordHash: CUSTOM the only thing that can answer
+            // that event is the listener registerEvents() just installed. On a boot that starts with
+            // config.yml already on CUSTOM (an ordinary restart leaves it there on purpose, see
+            // onDisable()), AuthMe enabled and resolved BEFORE we existed, so it cached a null method
+            // and comparePassword() returns false for every player. Registering the listener does not
+            // retroactively fix that cache - AuthMe has to re-resolve. Config-value checks cannot
+            // stand in for this: isConfigCompatible() is true in exactly that scenario, so the
+            // forceConfig() branch below never runs and nothing else would ever reload AuthMe.
+            // Gated on the eventsRegistered flip, so the 3s reconnect retry loop still cannot turn
+            // this into an "authme reload" every 3 seconds.
+            reloadAuthMe()
         }
 
         // Reload from disk before checking compatibility, so the check reflects the real current
@@ -472,6 +485,12 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
         initialized = true
         registerEvents()
         eventsRegistered = true
+
+        // AuthMe already enabled and cached a null EncryptionMethod for CUSTOM, because our listener
+        // did not exist yet at that point - make it re-resolve now that it does. Same reasoning as in
+        // performStart(); without this every login fails with "wrong password" until someone runs
+        // "/authme reload" by hand.
+        reloadAuthMe()
 
         logger.info("&eReconciled AuthMe integration at startup (leftover CUSTOM from a previous session).".colorize())
     }
