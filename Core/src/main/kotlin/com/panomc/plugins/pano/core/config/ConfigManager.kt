@@ -283,4 +283,19 @@ class ConfigManager(vertx: Vertx, private val logger: Logger, dataFolder: File) 
         config = PanoConfig.from(newConfig)
         configJsonObject = newConfig.copy()
     }
+
+    /**
+     * Closes [configRetriever], cancelling the periodic listener registered by [listenConfigFile] so it
+     * stops polling config.conf via the shared Vert.x after this ConfigManager is torn down. Not invoked
+     * automatically by Spring: the `configManager` bean in SpringConfig is declared
+     * `@Bean(destroyMethod = "")` precisely so this doesn't also fire via Spring's inferred-destroy-method
+     * resolution when the DI container closes -- callers must call this explicitly (Pano.stop() does, next
+     * to its other teardown steps). Never blocks: ConfigRetriever.close() itself just returns a Future, so
+     * any failure is only logged, not thrown back at the caller.
+     */
+    fun close() {
+        configRetriever.close().onFailure { cause ->
+            logger.warning("Failed to close config retriever: $cause")
+        }
+    }
 }

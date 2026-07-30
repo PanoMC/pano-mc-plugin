@@ -14,6 +14,16 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration {
+    // `by lazy` (Kotlin's default SYNCHRONIZED mode) holds an implicit per-property monitor for the
+    // whole initializer below, including the call into panoPluginMain.getPano() -- which, if mPano
+    // hasn't resolved yet, blocks synchronously inside the platform main's lifecycleLock section on
+    // the blocking Pano.init(). That IS a lock held across a blocking Pano.init() call; it's just
+    // not one of this plugin's two *named* locks. lifecycleLock/registrationLock on each platform
+    // main are still correctly documented as never held across Pano.init()/Pano.disable() -- that
+    // guarantee is real, it simply doesn't cover this monitor, which belongs to the `lazy` delegate
+    // itself. No path from Pano.init()'s own call graph back into this property has been found, so
+    // this isn't a proven deadlock today, but any future caller that reaches `pano` here from a
+    // Vert.x event-loop callback nested inside init()/disable() would create one.
     private val pano by lazy {
         panoPluginMain.getPano()
     }

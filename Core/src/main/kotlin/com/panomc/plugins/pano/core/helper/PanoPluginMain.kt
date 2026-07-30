@@ -22,12 +22,6 @@ interface PanoPluginMain {
 
     fun unregisterCommands(commands: List<Command>)
 
-    fun registerSchedule(task: () -> Unit)
-
-    fun stopSchedule(task: () -> Unit)
-
-    fun unregisterSchedules(tasks: List<() -> Unit>)
-
     fun getServerData(): ServerData
 
     fun getPluginClassLoader(): URLClassLoader

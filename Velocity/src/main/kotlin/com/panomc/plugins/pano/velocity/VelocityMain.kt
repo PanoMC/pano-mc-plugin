@@ -31,16 +31,32 @@ import java.io.File
 
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArraySet
-import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
 class VelocityMain : PanoPluginMain {
-    // Two distinct monitors so that nothing reachable from Pano.init()/Pano.disable()'s callbacks
-    // into this class can ever block on a lock a thread is holding while parked inside those two
-    // (blocking, event-loop-re-entrant) calls. Neither lock is ever held across either call — see
-    // getPano()/onDisable() below.
+    // panoInitLock is held by getPano() ONLY -- across its entire body, including the blocking
+    // Pano.init() call -- and by nothing else in this class. That makes getPano() single-flight:
+    // at most one Pano is ever under construction at a time, so there is never a second, losing
+    // construction left over to reconcile against a winner afterwards (see getPano()). This is
+    // deadlock-free because the calls Pano.init()'s own callback graph makes back into this class
+    // while a thread is parked in its runBlocking { deployVerticle(...) } are closed and small:
+    // CommandManager.init() -> registerCommands() and EventManager.init() ->
+    // registerEventListeners() (both take registrationLock only), plus
+    // getDataFolder()/getPanoLogger()/getServerData()/getPluginClassLoader() (no lock at all) --
+    // enumerated from Pano.init()'s own init() call graph (initDependencyInjection() ->
+    // initCommandManager()/initEventManager()). None of them calls getPano(), so none of them can
+    // ever block waiting on panoInitLock.
+    //
+    // lifecycleLock/registrationLock are the two distinct monitors so that nothing reachable from
+    // Pano.disable()'s callbacks into this class can ever block on either while a thread is parked
+    // inside that blocking, event-loop-re-entrant call. Neither is ever held across it — see
+    // onDisable() below. (Not a guarantee about every lock in the process, though: an integration's
+    // own `pano by lazy { panoPluginMain.getPano() }` -- see LimboAuthIntegration -- still holds
+    // that lazy delegate's own monitor across its first, initializing getPano() call; that lock
+    // belongs to the integration, not to this class, and isn't covered by the split below.)
     //   lifecycleLock    guards: mPano, integrations, disabled, startTask
-    //   registrationLock guards: commands, scheduledTasks, velocityEventListener + eventListenerRegistered
+    //   registrationLock guards: commands, velocityEventListener + eventListenerRegistered
+    private val panoInitLock = Any()
     private val lifecycleLock = Any()
     private val registrationLock = Any()
 
@@ -57,9 +73,23 @@ class VelocityMain : PanoPluginMain {
     @Volatile
     private var disabled = false
 
-    // Guarded by registrationLock.
-    private val commands = mutableMapOf<VelocityCommand, CommandMeta>()
-    private val scheduledTasks = mutableMapOf<() -> Unit, ScheduledTask>()
+    // Guarded by lifecycleLock. Bumped once at the start of every onEnable() and once inside every
+    // onDisable(), so any *completed* disable-then-enable cycle changes the value even though
+    // `disabled` itself is cleared back to false by that same onEnable(). getPano() snapshots this
+    // before calling Pano.init() and compares it against the current value afterwards: `disabled`
+    // alone can't catch a full cycle finishing while a thread is parked in Pano.init() -- and on
+    // Velocity that's not hypothetical, `/velocity reload` fires ProxyReloadEvent, whose handler is
+    // exactly onDisable() followed by onEnable() -- because that thread would wake up to find
+    // disabled == false again and publish an instance belonging to the enable cycle that already
+    // tore its event listener down (see getPano()).
+    private var enableGeneration = 0
+
+    // Guarded by registrationLock. Keyed by the Command passed to registerCommands() (identity --
+    // Command has no equals/hashCode override, and CommandManager passes the same list instance to
+    // both registerCommands()/unregisterCommands() for a given Pano instance's lifetime, so identity
+    // is enough) so unregisterCommands(commands) can target exactly the entries it was passed,
+    // instead of every command this VelocityMain has ever registered.
+    private val commands = mutableMapOf<Command, Pair<VelocityCommand, CommandMeta>>()
     // The one-off onServerStart() boot task: cancelled on onDisable() so a reload landing mid-boot
     // can't have it fire getPano().onServerStart() after Pano was already torn down. Guarded by
     // lifecycleLock.
@@ -127,61 +157,60 @@ class VelocityMain : PanoPluginMain {
 
     override fun getPanoLogger(): Logger = logger
 
-    // Not @Synchronized as a whole — see the lifecycleLock/registrationLock note on the class.
-    // Pano.init() below does `runBlocking { vertx.deployVerticle(pano).coAwait() }`: it blocks this
-    // thread while the deployment runs on the Vert.x event loop and calls back into this class
-    // (CommandManager.init() -> registerCommands(), EventManager.init() -> registerEventListeners(),
-    // both registrationLock). If this thread held any lock across that call, and the event loop's
-    // callback needed the same lock, that would be a guaranteed deadlock — so lifecycleLock is only
-    // ever held for the plain field reads/writes below, never across Pano.init() itself.
+    // Not @Synchronized as a whole — see the panoInitLock/lifecycleLock/registrationLock note on
+    // the class. Pano.init() below does `runBlocking { vertx.deployVerticle(pano).coAwait() }`: it
+    // blocks this thread while the deployment runs on the Vert.x event loop and calls back into
+    // this class (CommandManager.init() -> registerCommands(), EventManager.init() ->
+    // registerEventListeners(), both registrationLock). panoInitLock is held across that call on
+    // purpose (see the class-level comment for why that's deadlock-free and what makes it
+    // single-flight); lifecycleLock is only ever held here for the plain field reads/writes below,
+    // never across Pano.init() itself.
     override fun getPano(): Pano {
-        synchronized(lifecycleLock) {
-            mPano?.let { return it }
-            check(!disabled) { "Pano requested after VelocityMain was disabled" }
-        }
+        synchronized(panoInitLock) {
+            val generationAtStart: Int
 
-        val created = Pano.init(this)
-
-        var staleToDispose: Pano? = null
-        var result: Pano? = null
-        var raceLostToDisable = false
-
-        synchronized(lifecycleLock) {
-            val existing = mPano
-
-            when {
-                existing != null -> {
-                    // Another getPano() call won the race while this thread was blocked in
-                    // Pano.init() above.
-                    staleToDispose = created
-                    result = existing
-                }
-
-                disabled -> {
-                    // onDisable() ran while this thread was blocked in Pano.init() above; don't
-                    // resurrect a Pano onto a VelocityMain instance that has since been torn down.
-                    staleToDispose = created
-                    raceLostToDisable = true
-                }
-
-                else -> {
-                    mPano = created
-                    result = created
-                }
+            synchronized(lifecycleLock) {
+                mPano?.let { return it }
+                check(!disabled) { "Pano requested after VelocityMain was disabled" }
+                generationAtStart = enableGeneration
             }
+
+            val created = Pano.init(this)
+
+            synchronized(lifecycleLock) {
+                // disabled alone isn't enough: onEnable() clears it back to false at the start of
+                // every enable, so a COMPLETE disable-then-re-enable cycle (e.g. a `/velocity
+                // reload`, whose ProxyReloadEvent handler is exactly onDisable() followed by
+                // onEnable()) that finishes while this thread was parked in Pano.init() above would
+                // otherwise leave `disabled == false` by the time we get here, and `created` would
+                // get published as if it belonged to the current (re-enabled) cycle even though it's
+                // actually an orphan of the PREVIOUS one -- one whose event listener onDisable()
+                // already unregistered. The generation check catches that: it changes on every
+                // completed enable/disable transition, so a mismatch here means at least one full
+                // cycle happened while we were inside Pano.init(), regardless of what `disabled`
+                // reads now. The explicit disabled check is kept too, for the ordinary (non-cycled)
+                // abort-after-disable case and to keep the fast path honest.
+                if (disabled || enableGeneration != generationAtStart) {
+                    // Abort-after-disable orphan: onDisable() ran to completion while this thread
+                    // was inside Pano.init() above, so `created` must never be published. dispose()
+                    // undeploys its verticle -- and, with no race-loser flag left for stop() to
+                    // special-case, correctly unregisters exactly the commands/listeners this
+                    // instance itself registered. getOrCreateVertx() inside Pano.init() may also
+                    // have had to hand `created` a brand-new Vert.x, since onDisable() already
+                    // closed whatever the previous one was: closeVertxForAbortedInit() closes that
+                    // instance in the background (never blocking, and only if it's still the one
+                    // installed in the companion's Vert.x reference) so its non-daemon event-loop/
+                    // worker threads can't hang the JVM at shutdown.
+                    created.disposeAndCloseVertxForAbortedInit()
+
+                    error("Pano requested after VelocityMain was disabled")
+                }
+
+                mPano = created
+            }
+
+            return created
         }
-
-        // dispose() (unlike disable()) is fire-and-forget and never blocks, but it's still called
-        // outside lifecycleLock here: it's the loser's own verticle deployment, so there's nothing
-        // gained by holding the lock across it, and keeping the shape identical to Pano.init() above
-        // avoids a lock being added back here by mistake later.
-        staleToDispose?.dispose()
-
-        if (raceLostToDisable) {
-            check(false) { "Pano requested after VelocityMain was disabled" }
-        }
-
-        return result!!
     }
 
     internal fun getServer(): ProxyServer = server
@@ -197,6 +226,7 @@ class VelocityMain : PanoPluginMain {
 
         synchronized(lifecycleLock) {
             disabled = false
+            enableGeneration++
             integrations = newIntegrations
         }
 
@@ -204,9 +234,10 @@ class VelocityMain : PanoPluginMain {
 
         val task: () -> Unit = {
             // A reload/shutdown can land between scheduling and this task actually firing (or while
-            // it is blocked entering getPano()'s lifecycleLock behind onDisable()); check the flag
-            // so a stale task doesn't resurrect a Pano that was just torn down. Unlocked read of the
-            // @Volatile flag is only an optimization — getPano() re-checks under lifecycleLock.
+            // it is blocked inside getPano(), e.g. behind onDisable()'s brief hold of lifecycleLock);
+            // check the flag so a stale task doesn't resurrect a Pano that was just torn down.
+            // Unlocked read of the @Volatile flag is only an optimization — getPano() re-checks under
+            // lifecycleLock.
             if (!disabled) {
                 getPano().onServerStart()
             }
@@ -221,18 +252,22 @@ class VelocityMain : PanoPluginMain {
         }
     }
 
-    // Not @Synchronized as a whole, and no single lock is ever held across pano?.disable() below —
-    // see the lifecycleLock/registrationLock note on the class. pano.disable() runs
-    // Pano.closeVertx(), which does `runBlocking { vertx.close().coAwait() }`: it blocks this thread
-    // until Vert.x finishes undeploying the Pano verticle, and undeploy runs Pano.stop() on the
-    // Vert.x event loop, which calls back into this class — CommandManager.disable() ->
-    // unregisterCommands(), EventManager.disable() -> unregisterEventListeners() (both
-    // registrationLock), ScheduleManager.disable() -> unregisterSchedules()/stopSchedule()
-    // (registrationLock), PlatformManager.stop() -> onDisconnect() -> Integration.onDisconnect()
-    // (no lock, R4). If this thread held registrationLock (or lifecycleLock) while blocked in
+    // Not @Synchronized as a whole, and neither lifecycleLock nor registrationLock is ever held
+    // across pano?.disable() below — see the class-level note. This method never touches
+    // panoInitLock at all (see the class-level comment: it is getPano()'s alone).
+    // pano.disable() runs Pano.closeVertx(), which does `runBlocking { vertx.close().coAwait() }`:
+    // it blocks this thread until Vert.x finishes undeploying the Pano verticle, and undeploy runs
+    // Pano.stop() on the Vert.x event loop, which calls back into this class — CommandManager.disable()
+    // -> unregisterCommands(), EventManager.disable() -> unregisterEventListeners() (both
+    // registrationLock), PlatformManager.stop() -> onDisconnect() -> Integration.onDisconnect()
+    // (no lock at all). If this thread held registrationLock (or lifecycleLock) while blocked in
     // runBlocking, those event-loop calls would block forever on a lock only this (blocked) thread
     // can release — a guaranteed deadlock. So state is captured into locals under each lock and both
-    // locks are fully released before pano.disable() is called.
+    // locks are fully released before pano.disable() is called. (Not a guarantee about every lock in
+    // the process, though: an integration's own `pano by lazy { panoPluginMain.getPano() }` still
+    // holds that lazy delegate's own monitor across its first, initializing getPano() call if
+    // nothing had touched it yet by the time that integration's onDisable() runs — a lock this class
+    // doesn't own or control.)
     private fun onDisable() {
         val pano: Pano?
         val integrationsSnapshot: List<Integration>
@@ -245,11 +280,12 @@ class VelocityMain : PanoPluginMain {
             integrations = emptyList()
 
             // Flip after capturing integrations above (whose onDisable() below still needs a live
-            // Pano/managers) but before mPano is released, so any getPano() call still blocked on
-            // lifecycleLock — e.g. a boot task from a previous onEnable that is mid-flight — sees the
-            // disabled state instead of reconstructing a Pano that this method is in the middle of
-            // tearing down.
+            // Pano/managers) but before mPano is released, so any getPano() call still mid-flight in
+            // Pano.init() — e.g. a boot task from a previous onEnable — sees the disabled state on
+            // its next lifecycleLock check instead of publishing (and resurrecting) a Pano that this
+            // method is in the middle of tearing down.
             disabled = true
+            enableGeneration++
 
             pano = mPano
             mPano = null
@@ -279,17 +315,16 @@ class VelocityMain : PanoPluginMain {
         pano?.disable()
     }
 
-    // Registration teardown mirrored on enable (register{Commands,EventListeners} +
-    // registerSchedule are the enable-side counterparts). Only ever mutates fields/collections plus
-    // the platform's own (un)register calls under registrationLock (R3) — nothing here blocks on
-    // Vert.x, a coroutine, or lifecycleLock, so it's safe to call from onDisable() with no other
-    // lock held.
+    // Registration teardown mirrored on enable (register{Commands,EventListeners} are the
+    // enable-side counterparts). Only ever mutates fields/collections plus the platform's own
+    // (un)register calls under registrationLock — nothing here blocks on Vert.x, a coroutine, or
+    // lifecycleLock, so it's safe to call from onDisable() with no other lock held.
     private fun tearDownRegistrations() {
         synchronized(registrationLock) {
             if (commands.isNotEmpty()) {
                 val commandManager = server.commandManager
 
-                commands.values.forEach { commandManager.unregister(it) }
+                commands.values.forEach { (_, commandMeta) -> commandManager.unregister(commandMeta) }
                 commands.clear()
             }
 
@@ -320,49 +355,33 @@ class VelocityMain : PanoPluginMain {
 
                     commandManager.register(commandMeta, velocityCommand)
 
-                    this.commands[velocityCommand] = commandMeta
+                    this.commands[command] = velocityCommand to commandMeta
                 }
         }
     }
 
-    // Idempotent: onDisable() already tears `commands` down (under registrationLock) before Pano is
-    // disabled, so by the time Pano.stop() -> CommandManager.disable() reaches this on a normal
-    // shutdown, `this.commands` is already empty and both the forEach and clear() below are no-ops.
+    // Idempotent: onDisable()'s tearDownRegistrations() already tears `commands` down (under
+    // registrationLock) before Pano is disabled, so by the time Pano.stop() ->
+    // CommandManager.disable() reaches this on a normal shutdown, the passed-in commands are already
+    // gone from `this.commands` and the loop below is a no-op for each of them. Only ever unregisters
+    // the entries this instance itself registered for the passed-in commands -- kept as hygiene over
+    // the old `this.commands.forEach {...}; this.commands.clear()` shape, which dropped every command
+    // this VelocityMain had ever registered instead of just the ones it was passed.
+    //
+    // This keying is NOT what makes a lost double-init race safe, though, and never was: Velocity's
+    // CommandManager.unregister(CommandMeta) is alias-scoped -- it drops the "pano" node from the
+    // shared Brigadier command root no matter which registration produced that CommandMeta, so if two
+    // Pano instances had ever coexisted, either one calling this would still tear out the other's live
+    // command regardless of which Command object keyed which CommandMeta here. That hazard is gone
+    // because getPano() (see there) no longer lets a second Pano instance be constructed in the first
+    // place, not because of anything this map's keying does.
     override fun unregisterCommands(commands: List<Command>) {
         synchronized(registrationLock) {
-            this.commands
-                .forEach { command ->
-                    val commandManager = server.commandManager
-
-                    commandManager.unregister(command.value)
+            commands.forEach { command ->
+                this.commands.remove(command)?.let { (_, commandMeta) ->
+                    server.commandManager.unregister(commandMeta)
                 }
-
-            this.commands.clear()
-        }
-    }
-
-    override fun registerSchedule(task: () -> Unit) {
-        synchronized(registrationLock) {
-            scheduledTasks[task]?.cancel()
-            scheduledTasks.remove(task)
-
-            scheduledTasks[task] = server.scheduler
-                .buildTask(this, task)
-                .repeat(1L, TimeUnit.SECONDS)
-                .schedule()
-        }
-    }
-
-    override fun stopSchedule(task: () -> Unit) {
-        synchronized(registrationLock) {
-            scheduledTasks[task]?.cancel()
-            scheduledTasks.remove(task)
-        }
-    }
-
-    override fun unregisterSchedules(tasks: List<() -> Unit>) {
-        tasks.forEach { task ->
-            stopSchedule(task)
+            }
         }
     }
 
@@ -423,20 +442,62 @@ class VelocityMain : PanoPluginMain {
         }
     }
 
+    // Each integration gets its own failure boundary, mirroring SpigotMain: without it, one
+    // integration throwing here would take out the rest of the fan-out, and since this runs on the
+    // Vert.x event loop (via PlatformManager.onWebSocketClosed() -> pluginMain.onDisconnect(), etc.)
+    // that would surface as an unhandled event-loop exception instead of a logged warning.
     override fun onConnectionEstablished(webSocket: WebSocket?) {
-        integrations.forEach { it.onConnectionEstablished(webSocket) }
+        // Unlike the other fan-outs, this one must not swallow. PlatformManager wraps its call to this
+        // method in a try/catch whose whole purpose is to notice a half-wired connection and abort into
+        // the reconnect path; eating the exception here would leave the socket up with integrations only
+        // partially hooked and nothing retrying. So keep the per-integration boundary -- every
+        // integration still gets its callback even if an earlier one throws -- but rethrow the first
+        // failure once the loop is done.
+        var firstFailure: Exception? = null
+
+        integrations.forEach {
+            try {
+                it.onConnectionEstablished(webSocket)
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle connection established: ${exception.message}")
+
+                if (firstFailure == null) {
+                    firstFailure = exception
+                }
+            }
+        }
+
+        firstFailure?.let { throw it }
     }
 
     override fun onDisconnect() {
-        integrations.forEach { it.onDisconnect() }
+        integrations.forEach {
+            try {
+                it.onDisconnect()
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle disconnect: ${exception.message}")
+            }
+        }
     }
 
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
-        integrations.forEach { it.onServerSettingsChanged(serverSettings) }
+        integrations.forEach {
+            try {
+                it.onServerSettingsChanged(serverSettings)
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle server settings change: ${exception.message}")
+            }
+        }
     }
 
     override fun onPermissionsSnapshotUpdated(message: PermissionsSnapshotUpdatedMessage) {
-        integrations.forEach { it.onPermissionsSnapshotUpdated(message) }
+        integrations.forEach {
+            try {
+                it.onPermissionsSnapshotUpdated(message)
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle permissions snapshot update: ${exception.message}")
+            }
+        }
     }
 
     override fun kickPlayer(player: String, message: String) {

@@ -26,18 +26,32 @@ import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
 class BungeeMain : Plugin(), PanoPluginMain {
-    // Two distinct monitors, deliberately never `this`: Pano.init()/Pano.disable() are blocking
-    // calls (runBlocking { deployVerticle/vertx.close ... }) that re-enter this class from the
-    // Vert.x event loop while the calling thread is parked inside them (CommandManager.init() ->
-    // registerCommands(), EventManager.init() -> registerEventListeners() during init();
-    // CommandManager.disable()/ScheduleManager.disable()/EventManager.disable()/
-    // PlatformManager.stop()->onDisconnect() during disable()). lifecycleLock guards the
-    // construct/teardown bookkeeping (mPano, integrations, disabled, startTask) and is NEVER held
-    // across those blocking calls; registrationLock guards the command/schedule/listener
-    // registrations those callbacks touch and never needs to wait on Vert.x, a coroutine, or
+    // panoInitLock is held by getPano() ONLY -- across its entire body, including the blocking
+    // Pano.init() call -- and by nothing else in this class. That makes getPano() single-flight:
+    // at most one Pano is ever under construction at a time, so there is never a second, losing
+    // construction left over to dispose of afterwards (see getPano()). This is deadlock-free
+    // because the calls Pano.init()'s own callback graph makes back into this class while a
+    // thread is parked in its runBlocking { deployVerticle(...) } are closed and small:
+    // CommandManager.init() -> registerCommands() and EventManager.init() ->
+    // registerEventListeners() (both take registrationLock only), plus
+    // getServerData()/getPanoLogger()/getDataFolder()/getPluginClassLoader() (no lock at all) --
+    // enumerated from Pano.init()'s own init() call graph (initDependencyInjection() ->
+    // initCommandManager()/initEventManager()). None of them calls getPano(), so none of them can
+    // ever block waiting on panoInitLock.
+    //
+    // lifecycleLock guards the construct/teardown bookkeeping (mPano, integrations, disabled,
+    // startTask) and registrationLock guards the command/listener registrations those callbacks
+    // touch. Symmetrically to panoInitLock/Pano.init(), neither of these two is ever held across
+    // Pano.disable() (see onDisable()): that call runs Pano.closeVertx() ->
+    // runBlocking { vertx.close().coAwait() }, and the undeploy it blocks on calls back into this
+    // class from the Vert.x event loop -- CommandManager.disable() -> unregisterCommands(),
+    // EventManager.disable() -> unregisterEventListeners() (both registrationLock), and
+    // PlatformManager.stop() -> onDisconnect() -> every Integration.onDisconnect() (no lock at
+    // all). registrationLock never needs to wait on Vert.x, a coroutine, panoInitLock or
     // lifecycleLock, so it can be held for the whole (fast, local) duration of each callback. As
-    // long as that split holds, neither lock can ever be the thing an event-loop callback is
-    // blocked on while its own thread is the one Pano.init()/disable() is waiting for.
+    // long as that split holds, none of the three locks can ever be the thing an event-loop
+    // callback is blocked on while its own thread is the one Pano.init()/disable() is waiting for.
+    private val panoInitLock = Any()
     private val lifecycleLock = Any()
     private val registrationLock = Any()
 
@@ -53,16 +67,33 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
     // Guarded by lifecycleLock. Flipped to true inside onDisable()'s lock block once teardown has
     // committed to tearing mPano down, and cleared at the start of the following onEnable(). Lets
-    // getPano() refuse to resurrect a Pano — and dispose of one it already built via Pano.init()
-    // outside the lock — if onDisable() finished while that construction was in flight.
+    // getPano() refuse to resurrect a Pano — and dispose of the one it just built via Pano.init(),
+    // and close the Vert.x it may have had to create for it — if onDisable() finished while that
+    // construction was in flight (see getPano()).
     private var disabled = false
+
+    // Guarded by lifecycleLock. Bumped once at the start of every onEnable() and once inside every
+    // onDisable(), so any *completed* disable-then-enable cycle changes the value even though
+    // `disabled` itself is cleared back to false by that same onEnable(). getPano() snapshots this
+    // before calling Pano.init() and compares it against the current value afterwards: `disabled`
+    // alone can't catch a full cycle that finishes while a thread is parked in Pano.init(), because
+    // that thread would wake up to find disabled == false again and publish an instance belonging to
+    // the enable cycle that already tore its event listener down (see getPano()).
+    private var enableGeneration = 0
 
     // Guarded by lifecycleLock. The one-off onServerStart() boot task: cancelled in onDisable() so
     // a shutdown landing mid-boot doesn't leave it free to call getPano() after teardown started.
     private var startTask: ScheduledTask? = null
 
-    // Guarded by registrationLock.
-    private val scheduledTasks = mutableMapOf<() -> Unit, ScheduledTask>()
+    // Guarded by registrationLock. Keyed by the Command passed to registerCommands() (identity --
+    // Command has no equals/hashCode override, and CommandManager passes the same list instance to
+    // both registerCommands()/unregisterCommands() for a given Pano instance's lifetime, so identity
+    // is enough) so unregisterCommands(commands) can target exactly the BungeeCommand wrappers it
+    // registered for those commands, instead of BungeeCord's PluginManager.unregisterCommands(Plugin)
+    // -- all-or-nothing per plugin -- which would tear down every command this main has ever
+    // registered, not just the ones a particular unregisterCommands() call was passed.
+    private val registeredCommands = mutableMapOf<Command, BungeeCommand>()
+
     private val serverData by lazy { BungeeServerData(this) }
 
     // Guarded by registrationLock: only ever read or written from inside
@@ -109,6 +140,7 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
         synchronized(lifecycleLock) {
             disabled = false
+            enableGeneration++
             integrations = newIntegrations
         }
 
@@ -124,14 +156,21 @@ class BungeeMain : Plugin(), PanoPluginMain {
         }
     }
 
-    // No lock may be held across mPano.disable() below (it runs Pano.closeVertx() ->
-    // runBlocking { vertx.close().coAwait() }, blocking this thread until the event loop finishes
-    // undeploying) or across pano?.disable() in general, since that undeploy calls back into this
-    // class from the Vert.x event loop — see the class-level comment. So this method only ever
-    // takes a lock for a bounded, local mutation, and always releases it before making a blocking
-    // call: lifecycleLock to capture-and-clear mPano/integrations/startTask/disabled, then
-    // registrationLock (via the block below) to actually unregister the event listener, then no
-    // lock at all for the integration callbacks and pano.disable() itself.
+    // Neither lifecycleLock nor registrationLock may be held across mPano.disable() below (it runs
+    // Pano.closeVertx() -> runBlocking { vertx.close().coAwait() }, blocking this thread until the
+    // event loop finishes undeploying) or across pano?.disable() in general, since that undeploy
+    // calls back into this class from the Vert.x event loop — see the class-level comment. This
+    // method never touches panoInitLock at all (see the class-level comment: it is getPano()'s
+    // alone). So this method only ever takes lifecycleLock or registrationLock for a bounded, local
+    // mutation, and always releases it before making a blocking call: lifecycleLock to
+    // capture-and-clear mPano/integrations/startTask/disabled, then registrationLock (via the block
+    // below) to actually unregister the event listener, then neither of those two for the
+    // integration callbacks and pano.disable() itself. (Not a guarantee about every lock in the
+    // process, though:
+    // PermissionIntegration/BanIntegration's own `pano by lazy { panoPluginMain.getPano() }` still
+    // holds that lazy delegate's own monitor across its first, initializing getPano() call if
+    // nothing had touched it yet by the time that integration's onDisable() runs -- a lock this
+    // class doesn't own or control.)
     override fun onDisable() {
         val pano: Pano?
         val integrationsToDisable: List<Integration>
@@ -139,11 +178,12 @@ class BungeeMain : Plugin(), PanoPluginMain {
         synchronized(lifecycleLock) {
             // Cancel the deferred start task first: if it never ran, mPano must stay unconstructed
             // (see the null check below); if it's mid-flight inside getPano(), disabled=true here
-            // makes it dispose of whatever Pano it builds instead of resurrecting one after this
-            // method has already finished tearing down (see getPano()).
+            // makes it abort and clean up the Pano it builds instead of publishing (and resurrecting)
+            // one after this method has already finished tearing down (see getPano()).
             startTask?.cancel()
             startTask = null
             disabled = true
+            enableGeneration++
 
             // Null check doubles as the isInitialized-equivalent guard: skip disable() entirely when
             // mPano was never constructed, and clear the field so a later re-enable of this same
@@ -191,50 +231,27 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
     override fun registerCommands(commands: List<Command>) {
         synchronized(registrationLock) {
-            commands
-                .map { BungeeCommand(it, this) }
-                .forEach { command ->
-                    proxy.pluginManager.registerCommand(this, command)
-                }
+            commands.forEach { command ->
+                val bungeeCommand = BungeeCommand(command, this)
+
+                registeredCommands[command] = bungeeCommand
+                proxy.pluginManager.registerCommand(this, bungeeCommand)
+            }
         }
     }
 
+    // Idempotent: a command missing from registeredCommands (already unregistered, or never
+    // registered by this instance) is simply skipped. Only ever unregisters the BungeeCommand
+    // wrappers this instance itself registered for the passed-in commands --
+    // proxy.pluginManager.unregisterCommand(Command) (singular; unlike the all-or-nothing
+    // unregisterCommands(Plugin) this replaces) takes the specific registered Command object, so
+    // this can never take down a command it did not itself register.
     override fun unregisterCommands(commands: List<Command>) {
         synchronized(registrationLock) {
-            proxy.pluginManager.unregisterCommands(this)
-        }
-    }
-
-    override fun registerSchedule(task: () -> Unit) {
-        synchronized(registrationLock) {
-            if (scheduledTasks.containsKey(task)) {
-                stopSchedule(task)
-            }
-
-            // A genuine repeating task, not a one-shot that re-invokes registerSchedule(task) from
-            // inside the callback: the old self-reschedule left a window where a scheduler-pool
-            // thread sitting between task.invoke() and the re-registration call could block on
-            // registrationLock while ScheduleManager.disable() -> unregisterSchedules() ran the
-            // cancel/remove on the Vert.x event loop, then acquire the lock and resurrect the
-            // just-cancelled entry. BungeeCord's TaskScheduler.schedule(plugin, task, delay, period,
-            // unit) overload runs the same Runnable on a fixed period on its own, so cancel() here
-            // (via stopSchedule/unregisterSchedules) is the only thing that can ever remove or
-            // re-add an entry, matching Velocity/Spigot/Fabric's shape.
-            scheduledTasks[task] = proxy.scheduler.schedule(this, Runnable { task.invoke() }, 1, 1, TimeUnit.SECONDS)
-        }
-    }
-
-    override fun stopSchedule(task: () -> Unit) {
-        synchronized(registrationLock) {
-            scheduledTasks[task]?.cancel()
-            scheduledTasks.remove(task)
-        }
-    }
-
-    override fun unregisterSchedules(tasks: List<() -> Unit>) {
-        synchronized(registrationLock) {
-            tasks.forEach { task ->
-                stopSchedule(task)
+            commands.forEach { command ->
+                registeredCommands.remove(command)?.let { bungeeCommand ->
+                    proxy.pluginManager.unregisterCommand(bungeeCommand)
+                }
             }
         }
     }
@@ -281,72 +298,122 @@ class BungeeMain : Plugin(), PanoPluginMain {
     override fun getPanoLogger(): Logger = logger
 
     override fun getPano(): Pano {
-        synchronized(lifecycleLock) {
-            mPano?.let { return it }
-            check(!disabled) { "Pano requested after BungeeMain was disabled" }
+        // Single-flight: everything from the disabled/already-published check through publishing
+        // `created` (or aborting it) runs under panoInitLock, so at most one thread is ever inside
+        // Pano.init() at a time and there is never a second, losing construction to reconcile
+        // against a winner afterwards. See the class-level comment for why holding this across
+        // Pano.init() cannot deadlock.
+        synchronized(panoInitLock) {
+            val generationAtStart: Int
+
+            synchronized(lifecycleLock) {
+                mPano?.let { return it }
+                check(!disabled) { "Pano requested after BungeeMain was disabled" }
+                generationAtStart = enableGeneration
+            }
+
+            // Neither lifecycleLock nor registrationLock is held across this: Pano.init() blocks in
+            // runBlocking { deployVerticle(...) }, and the verticle's start() calls back into this
+            // class (CommandManager.init() -> registerCommands(), EventManager.init() ->
+            // registerEventListeners()) from the Vert.x event loop while this thread is parked here
+            // — see the class-level comment for the full enumeration. (Only this class's own locks,
+            // though: if this call was reached through an integration's
+            // `pano by lazy { panoPluginMain.getPano() }` being touched for the first time, that
+            // lazy delegate's own monitor is held by this same thread for the whole call — a lock
+            // this class doesn't own or control.)
+            val created = Pano.init(this)
+
+            synchronized(lifecycleLock) {
+                // disabled alone isn't enough: onEnable() clears it back to false at the start of
+                // every enable, so a COMPLETE disable-then-re-enable cycle that finishes while this
+                // thread was parked in Pano.init() above would otherwise leave `disabled == false`
+                // by the time we get here, and `created` would get published as if it belonged to
+                // the current (re-enabled) cycle even though it's actually an orphan of the PREVIOUS
+                // one -- one whose event listener onDisable() already unregistered. The generation
+                // check catches that: it changes on every completed enable/disable transition, so a
+                // mismatch here means at least one full cycle happened while we were inside
+                // Pano.init(), regardless of what `disabled` reads now. The explicit disabled check
+                // is kept too, for the ordinary (non-cycled) abort-after-disable case and to keep the
+                // fast path honest.
+                if (disabled || enableGeneration != generationAtStart) {
+                    // Abort-after-disable orphan: onDisable() ran to completion while this thread
+                    // was inside Pano.init() above, so `created` must never be published. dispose()
+                    // undeploys its verticle -- and, with no race-loser flag left for stop() to
+                    // special-case, correctly unregisters exactly the commands/listeners this
+                    // instance itself registered. getOrCreateVertx() inside Pano.init() may also
+                    // have had to hand `created` a brand-new Vert.x, since onDisable() already
+                    // closed whatever the previous one was: closeVertxForAbortedInit() closes that
+                    // instance in the background (never blocking, and only if it's still the one
+                    // installed in the companion's Vert.x reference) so its non-daemon event-loop/
+                    // worker threads can't hang JVM shutdown.
+                    created.disposeAndCloseVertxForAbortedInit()
+
+                    error("Pano requested after BungeeMain was disabled")
+                }
+
+                mPano = created
+            }
+
+            return created
         }
+    }
 
-        // NO lock held across this: Pano.init() blocks in runBlocking { deployVerticle(...) }, and
-        // the verticle's start() calls back into this class (CommandManager.init() ->
-        // registerCommands(), EventManager.init() -> registerEventListeners()) from the Vert.x
-        // event loop while this thread is parked here. Those callbacks only take registrationLock,
-        // never lifecycleLock — but the rule is unconditional (see the class-level comment), so
-        // this never holds lifecycleLock here regardless.
-        val created = Pano.init(this)
+    // Each integration gets its own failure boundary, mirroring SpigotMain: without it, one
+    // integration throwing here would take out the rest of the fan-out, and since this runs on the
+    // Vert.x event loop (via PlatformManager.onWebSocketClosed() -> pluginMain.onDisconnect(), etc.)
+    // that would surface as an unhandled event-loop exception instead of a logged warning.
+    override fun onConnectionEstablished(webSocket: WebSocket?) {
+        // Unlike the other fan-outs, this one must not swallow. PlatformManager wraps its call to this
+        // method in a try/catch whose whole purpose is to notice a half-wired connection and abort into
+        // the reconnect path; eating the exception here would leave the socket up with integrations only
+        // partially hooked and nothing retrying. So keep the per-integration boundary -- every
+        // integration still gets its callback even if an earlier one throws -- but rethrow the first
+        // failure once the loop is done.
+        var firstFailure: Exception? = null
 
-        var staleToDispose: Pano? = null
+        integrations.forEach {
+            try {
+                it.onConnectionEstablished(webSocket)
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle connection established: ${exception.message}")
 
-        val result = synchronized(lifecycleLock) {
-            val existing = mPano
-
-            when {
-                existing != null -> {
-                    // Someone else won the construction race while we were in Pano.init(): drop ours.
-                    staleToDispose = created
-                    existing
-                }
-
-                disabled -> {
-                    // onDisable() ran to completion while we were inside Pano.init(): nothing else
-                    // will ever dispose of `created` otherwise, leaking its verticle deployment
-                    // (WebSocket connection, DI context) past shutdown. dispose() only undeploys
-                    // that one deployment, so it can't touch the shared vertxInstance singleton or
-                    // reopen the hang this redesign removes even if that singleton is already
-                    // closing elsewhere.
-                    staleToDispose = created
-                    null
-                }
-
-                else -> {
-                    mPano = created
-                    created
+                if (firstFailure == null) {
+                    firstFailure = exception
                 }
             }
         }
 
-        // Outside the lock (not that it would matter now): dispose() only fires off
-        // vertx.undeploy(id) and returns, never touching the shared vertxInstance or blocking. Using
-        // disable() here would be wrong even off the lock — it would tear down the shared Vert.x
-        // that the race's WINNER (mPano) is deployed on, not just this losing instance's deployment.
-        staleToDispose?.dispose()
-
-        return result ?: error("Pano requested after BungeeMain was disabled")
-    }
-
-    override fun onConnectionEstablished(webSocket: WebSocket?) {
-        integrations.forEach { it.onConnectionEstablished(webSocket) }
+        firstFailure?.let { throw it }
     }
 
     override fun onDisconnect() {
-        integrations.forEach { it.onDisconnect() }
+        integrations.forEach {
+            try {
+                it.onDisconnect()
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle disconnect: ${exception.message}")
+            }
+        }
     }
 
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
-        integrations.forEach { it.onServerSettingsChanged(serverSettings) }
+        integrations.forEach {
+            try {
+                it.onServerSettingsChanged(serverSettings)
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle server settings change: ${exception.message}")
+            }
+        }
     }
 
     override fun onPermissionsSnapshotUpdated(message: PermissionsSnapshotUpdatedMessage) {
-        integrations.forEach { it.onPermissionsSnapshotUpdated(message) }
+        integrations.forEach {
+            try {
+                it.onPermissionsSnapshotUpdated(message)
+            } catch (exception: Exception) {
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle permissions snapshot update: ${exception.message}")
+            }
+        }
     }
 
     override fun kickPlayer(player: String, message: String) {

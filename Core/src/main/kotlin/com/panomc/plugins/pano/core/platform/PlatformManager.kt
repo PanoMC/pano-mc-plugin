@@ -109,14 +109,25 @@ class PlatformManager(
     @Volatile
     private var deathWatchdogTimerId: Long? = null
 
-    // Epoch millis of the last pong received for the CURRENTLY active socket. Seeded to "now"
-    // the instant the heartbeat starts (before the pongHandler or the death watchdog's first
+    // Epoch millis of the last pong received for the CURRENTLY active socket. Seeded to "now" by
+    // startHeartbeat itself (before the pongHandler is registered or the death watchdog's first
     // timer can run) so the first interval can never look like an instant timeout before a
-    // single ping has had a chance to round-trip (platform-core-heartbeat). @Volatile: written
-    // from the pongHandler and read from the death watchdog's timer callback (for the elapsed-time
-    // log line - the watchdog's own fire instant, not this field, is what actually decides the
-    // peer is dead, see scheduleDeathWatchdog) - two different Handler instances even though both
-    // happen to run on the same Vert.x context.
+    // single ping has had a chance to round-trip (platform-core-heartbeat). @Volatile: written by
+    // startHeartbeat's own seed assignment and, from then on, by the pongHandler; read from the
+    // death watchdog's timer callback (for the elapsed-time log line - the watchdog's own fire
+    // instant, not this field, is what actually decides the peer is dead, see
+    // scheduleDeathWatchdog) - call sites that are NOT guaranteed to share a Vert.x context. On
+    // the default await-pano-connection: true path, connectPlatformTask's synchronous phase
+    // drives establishConnectionToPlatform through runBlocking, so it resumes on the Minecraft
+    // server's own main thread rather than a Vert.x thread; startHeartbeat's seed write and its
+    // vertx.setPeriodic/setTimer calls then run from there too, which makes Vert.x spin up an
+    // ad-hoc context for them - while the pongHandler always fires on the socket's own I/O
+    // context. Safe anyway: the seed write happens-before the pongHandler is even registered and
+    // before the watchdog's first timer is scheduled - both are set up later in that same
+    // startHeartbeat call, on the same thread - so it can never race either of them; after that,
+    // only the pongHandler ever writes and only the watchdog ever reads, never a read-modify-write
+    // shared between the two, so @Volatile's plain write-then-read visibility guarantee is all
+    // correctness needs here - no shared context required.
     @Volatile
     private var lastPongReceivedAt: Long = 0
 
@@ -868,15 +879,23 @@ class PlatformManager(
                 return@setPeriodic
             }
 
-            try {
-                socket.writePing(Buffer.buffer())
-            } catch (exception: Exception) {
-                // writePing throws against an already-closed/broken socket - treat that the same
-                // as a missed pong instead of letting it escape the periodic callback
-                // (platform-core-heartbeat).
-                logger.warning(pluginMain.translateColor("&eFailed to send heartbeat ping to Pano Platform. Reason: ${exception.message}"))
+            // writePing (Vert.x 5) never throws synchronously here - a closed/broken socket, or
+            // a ping payload over 125 bytes, both resolve as a FAILED Future instead (verified
+            // against WebSocketImplBase.writeFrame/writePing: the closed check returns
+            // context.failedFuture(...), never a throw). A synchronous try/catch around this call
+            // is therefore dead code on every path, including the oversized-payload contract -
+            // moot anyway since Buffer.buffer() here is always empty. Mirror the backend's
+            // ServerManager and attach onFailure instead (platform-core-heartbeat).
+            socket.writePing(Buffer.buffer()).onFailure { cause ->
+                // The Future can complete after this socket has already been superseded (closed,
+                // replaced by a newer connection) - re-check identity the same way the
+                // pongHandler/death watchdog do, so a failure for a stale socket can't tear down
+                // a connection that has since replaced it (platform-core-heartbeat).
+                if (this.webSocket === socket) {
+                    logger.warning(pluginMain.translateColor("&eFailed to send heartbeat ping to Pano Platform. Reason: ${cause.message}"))
 
-                killHeartbeatConnection(socket)
+                    killHeartbeatConnection(socket)
+                }
             }
         }
 

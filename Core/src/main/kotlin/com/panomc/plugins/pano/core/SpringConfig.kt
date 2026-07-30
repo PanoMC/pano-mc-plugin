@@ -7,7 +7,6 @@ import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.platform.PlatformManager
-import com.panomc.plugins.pano.core.schedule.ScheduleManager
 import io.vertx.core.Vertx
 import io.vertx.core.http.WebSocketClient
 import io.vertx.ext.web.client.WebClient
@@ -32,7 +31,13 @@ open class SpringConfig {
     @Autowired
     private lateinit var applicationContext: AnnotationConfigApplicationContext
 
-    @Bean
+    // destroyMethod = "": this bean returns the verticle's own `vertx` -- the SHARED Vert.x instance
+    // every Pano deployment runs on (see vertxInstanceRef in Pano.kt), not something this DI container
+    // owns the lifecycle of. Spring's default "(inferred)" @Bean destroy-method resolution would
+    // otherwise find Vertx's public no-arg close() and invoke it when Pano#stop() closes the
+    // applicationContext, closing the shared instance out from under every other deployment. Same goal
+    // and same mechanism as configManager()'s destroy-method neutralisation below.
+    @Bean(destroyMethod = "")
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
     open fun vertx() = vertx
 
@@ -40,7 +45,12 @@ open class SpringConfig {
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
     open fun logger(): Logger = panoPluginMain.getPanoLogger()
 
-    @Bean
+    // destroyMethod = "": ConfigManager.close() (added alongside this) must run exactly once, via the
+    // explicit call Pano.stop() makes next to its other teardown steps -- not a second time via Spring's
+    // default "(inferred)" destroy-method resolution, which would otherwise find this same public no-arg
+    // close() and invoke it again when the DI container closes. Same goal as the vertx() bean's
+    // destroy-method neutralisation above.
+    @Bean(destroyMethod = "")
     @Lazy
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
     open fun configManager() =
@@ -55,18 +65,12 @@ open class SpringConfig {
     @Bean
     @Lazy
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
-    open fun scheduleManager() = ScheduleManager(panoPluginMain)
-
-    @Bean
-    @Lazy
-    @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
     open fun eventManager(platformManager: PlatformManager) = EventManager(panoPluginMain, platformManager)
 
     @Bean
     @Lazy
     @Scope(value = ConfigurableBeanFactory.SCOPE_SINGLETON)
     open fun platformManager(
-        scheduleManager: ScheduleManager,
         configManager: ConfigManager,
         webClient: WebClient,
         webSocketClient: WebSocketClient,
