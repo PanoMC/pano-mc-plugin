@@ -377,14 +377,25 @@ class PlatformManager(
                 throw PanoError("&cError: Invalid port number '$p'. Port must be between 0 and 65535.")
             }
 
-            // No explicit scheme was given: only try HTTPS. Do NOT silently fall back to plain
-            // HTTP here — that would transmit the one-time platform code and the returned bearer
-            // token in the clear. An operator who wants a plaintext connection (e.g. a local
-            // self-hosted panel) opts in explicitly with an "http://" prefix, handled above
-            // (platform-core-12 / cross-cutting-12).
+            // No explicit scheme was given: always try HTTPS first so an encrypted platform
+            // wins whenever one is listening. Plain HTTP is attempted only as a fallback, and
+            // only when the host is unambiguously loopback/private — there the one-time platform
+            // code and the returned bearer token never leave a trusted network. For a public
+            // host we still refuse to downgrade silently: that would leak both in the clear and
+            // let anyone able to block the HTTPS attempt force the downgrade. Such an operator
+            // opts in explicitly with an "http://" prefix, handled above (platform-core-12 /
+            // cross-cutting-12).
             configsToTry.add(Triple(h, p, true))
+
+            if (isLocalOrPrivateHost(h)) {
+                configsToTry.add(Triple(h, p, false))
+            }
         } else {
             configsToTry.add(Triple(platformAddress, 443, true))
+
+            if (isLocalOrPrivateHost(platformAddress)) {
+                configsToTry.add(Triple(platformAddress, 80, false))
+            }
         }
 
         val requestBody = JsonObject()
@@ -461,7 +472,17 @@ class PlatformManager(
                 "${if (s) "https" else "http"}://$h:$p"
             }
             logger.warning("Couldn't connect to Pano Platform. Tried: $triedConfigs. Last error: ${lastException?.message ?: "Unknown"}")
-            throw PanoError("&cCouldn't connect to Pano Platform. Tried: $triedConfigs")
+
+            // Only HTTPS was attempted, so the likeliest cause is a platform served over plain
+            // HTTP on a public host - which is never downgraded to automatically. Point at the
+            // explicit opt-in instead of leaving the operator with a bare "couldn't connect".
+            val hint = if (configsToTry.none { !it.third }) {
+                " &eIf your platform is served over plain HTTP, retry with an explicit \"http://\" prefix."
+            } else {
+                ""
+            }
+
+            throw PanoError("&cCouldn't connect to Pano Platform. Tried: $triedConfigs$hint")
         }
 
         val body = finalResponse.bodyAsJsonObject()
@@ -487,8 +508,9 @@ class PlatformManager(
         if (finalSsl) {
             logger.info(pluginMain.translateColor("&2Connected to Pano Platform at https://$finalHost:$finalPort"))
         } else {
-            // Make the cleartext downgrade loud rather than automatic (platform-core-12 /
-            // cross-cutting-12) - the operator explicitly opted into "http://" for this to happen.
+            // Make the cleartext connection loud (platform-core-12 / cross-cutting-12) - this is
+            // only reachable when the operator wrote an explicit "http://" prefix, or when the
+            // host is loopback/private and HTTPS wasn't answered.
             logger.warning(pluginMain.translateColor("&eConnected to Pano Platform at http://$finalHost:$finalPort - this connection is NOT encrypted."))
         }
 
@@ -1099,6 +1121,66 @@ class PlatformManager(
             // cancellation - so pendingResponses can never accumulate a stale entry
             // (platform-core-2 / platform-core-13).
             pendingResponses.remove(platformRequest.eventId)
+        }
+    }
+
+    /**
+     * Whether [host] is unambiguously loopback or on a private/link-local network, i.e. a host
+     * where falling back to plain HTTP keeps the platform code and bearer token inside a trusted
+     * network.
+     *
+     * Deliberately string-based on the literal the operator typed: this runs on the /pano command's
+     * coroutine and must not block on a DNS lookup, and a public name that merely *resolves* to a
+     * private address today is not proof the traffic stays on a trusted network tomorrow.
+     */
+    private fun isLocalOrPrivateHost(host: String): Boolean {
+        // Strip IPv6 brackets and any zone id ("[fe80::1%eth0]" -> "fe80::1").
+        val normalizedHost = host.trim().removeSurrounding("[", "]").substringBefore('%').lowercase()
+
+        if (normalizedHost.isEmpty()) {
+            return false
+        }
+
+        if (normalizedHost == "localhost" ||
+            normalizedHost.endsWith(".localhost") ||
+            normalizedHost.endsWith(".local") ||
+            normalizedHost.endsWith(".internal") ||
+            normalizedHost.endsWith(".home.arpa")
+        ) {
+            return true
+        }
+
+        if (normalizedHost.contains(":")) {
+            // ::1 (loopback), fc00::/7 (unique local), fe80::/10 (link-local).
+            return normalizedHost == "::1" ||
+                    normalizedHost.startsWith("fc") ||
+                    normalizedHost.startsWith("fd") ||
+                    normalizedHost.startsWith("fe8") ||
+                    normalizedHost.startsWith("fe9") ||
+                    normalizedHost.startsWith("fea") ||
+                    normalizedHost.startsWith("feb")
+        }
+
+        val octets = normalizedHost.split(".")
+
+        if (octets.size != 4) {
+            return false
+        }
+
+        val numbers = octets.map { octet -> octet.toIntOrNull() ?: return false }
+
+        if (numbers.any { number -> number !in 0..255 }) {
+            return false
+        }
+
+        // 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16.
+        return when {
+            numbers[0] == 127 -> true
+            numbers[0] == 10 -> true
+            numbers[0] == 172 && numbers[1] in 16..31 -> true
+            numbers[0] == 192 && numbers[1] == 168 -> true
+            numbers[0] == 169 && numbers[1] == 254 -> true
+            else -> false
         }
     }
 
