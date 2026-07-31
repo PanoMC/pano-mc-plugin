@@ -203,11 +203,35 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
         listeners.remove(preLoginListener)
     }
 
-    private fun getLimboAuth(): LimboAuth? =
-        server.pluginManager.getPlugin("limboauth")
+    // LimboAuth is an optional, compile-only dependency: on a proxy that doesn't have it installed
+    // NOTHING in net.elytrium.limboauth.* can be linked. Resolving the class by name (never as a
+    // direct type reference) is the only way to ask that question safely -- checking the plugin
+    // manager alone is not enough, because the LimboAuth-typed lambda in getLimboAuth() has to be
+    // linked before it can run and blows up with NoClassDefFoundError even when the Optional it
+    // would be applied to is empty. That error is a LinkageError, not an Exception, so it sailed
+    // past every integration failure boundary and killed the Vert.x event-loop thread on connect.
+    private val limboAuthClassPresent: Boolean by lazy {
+        try {
+            Class.forName("net.elytrium.limboauth.LimboAuth", false, javaClass.classLoader)
+
+            true
+        } catch (_: LinkageError) {
+            false
+        } catch (_: ClassNotFoundException) {
+            false
+        }
+    }
+
+    private fun getLimboAuth(): LimboAuth? {
+        if (!limboAuthClassPresent) {
+            return null
+        }
+
+        return server.pluginManager.getPlugin("limboauth")
             .flatMap { it.instance }
             .map { it as LimboAuth }
             .orElse(null)
+    }
 
     // Reconcile LimboAuth's registration state with Pano's at PRE-LOGIN (before authPlayer), mirroring
     // AuthMe's AsyncPlayerPreLoginEvent reconcile: if Pano knows the player but LimboAuth does not,

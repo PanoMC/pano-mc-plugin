@@ -453,16 +453,25 @@ class VelocityMain : PanoPluginMain {
         // partially hooked and nothing retrying. So keep the per-integration boundary -- every
         // integration still gets its callback even if an earlier one throws -- but rethrow the first
         // failure once the loop is done.
-        var firstFailure: Exception? = null
+        var firstFailure: Throwable? = null
 
         integrations.forEach {
             try {
                 it.onConnectionEstablished(webSocket)
-            } catch (exception: Exception) {
-                logger.warning("Integration ${it.javaClass.simpleName} failed to handle connection established: ${exception.message}")
+            } catch (failure: Throwable) {
+                // Throwable, not Exception: an integration whose optional dependency isn't
+                // installed (LimboAuth on a proxy without it) fails with a LinkageError --
+                // precisely the "this integration can't run here" case this boundary exists for,
+                // yet it used to escape onto the Vert.x event loop. Genuine VM failures are still
+                // re-thrown so an OOM is never masked as an integration bug.
+                if (failure is VirtualMachineError) {
+                    throw failure
+                }
+
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle connection established: ${failure.message}")
 
                 if (firstFailure == null) {
-                    firstFailure = exception
+                    firstFailure = failure
                 }
             }
         }
@@ -474,8 +483,12 @@ class VelocityMain : PanoPluginMain {
         integrations.forEach {
             try {
                 it.onDisconnect()
-            } catch (exception: Exception) {
-                logger.warning("Integration ${it.javaClass.simpleName} failed to handle disconnect: ${exception.message}")
+            } catch (failure: Throwable) {
+                if (failure is VirtualMachineError) {
+                    throw failure
+                }
+
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle disconnect: ${failure.message}")
             }
         }
     }
@@ -484,8 +497,12 @@ class VelocityMain : PanoPluginMain {
         integrations.forEach {
             try {
                 it.onServerSettingsChanged(serverSettings)
-            } catch (exception: Exception) {
-                logger.warning("Integration ${it.javaClass.simpleName} failed to handle server settings change: ${exception.message}")
+            } catch (failure: Throwable) {
+                if (failure is VirtualMachineError) {
+                    throw failure
+                }
+
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle server settings change: ${failure.message}")
             }
         }
     }
@@ -494,8 +511,12 @@ class VelocityMain : PanoPluginMain {
         integrations.forEach {
             try {
                 it.onPermissionsSnapshotUpdated(message)
-            } catch (exception: Exception) {
-                logger.warning("Integration ${it.javaClass.simpleName} failed to handle permissions snapshot update: ${exception.message}")
+            } catch (failure: Throwable) {
+                if (failure is VirtualMachineError) {
+                    throw failure
+                }
+
+                logger.warning("Integration ${it.javaClass.simpleName} failed to handle permissions snapshot update: ${failure.message}")
             }
         }
     }

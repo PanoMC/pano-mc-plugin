@@ -646,11 +646,21 @@ class PlatformManager(
 
         try {
             onConnectionEstablished()
-        } catch (exception: Exception) {
+        } catch (failure: Throwable) {
             // A failure here (e.g. a malformed platform.encryption-key) used to escape all the
             // way out of connectPlatformTask with the socket left open and half the plugin never
             // wired up (platform-core-7). Tear the half-open connection down and retry instead.
-            logger.severe(pluginMain.translateColor("&cError: Failed to finish connecting to Pano Platform. Reason: ${exception.message}"))
+            //
+            // Throwable rather than Exception: a platform integration whose optional dependency
+            // isn't installed fails with a LinkageError, which is an Error, so it used to slip
+            // past this boundary and die on the Vert.x event-loop thread - leaving exactly the
+            // half-open socket with nothing retrying that this catch was written to prevent.
+            // Genuine VM failures are re-thrown so an OOM is never mistaken for a wiring problem.
+            if (failure is VirtualMachineError) {
+                throw failure
+            }
+
+            logger.severe(pluginMain.translateColor("&cError: Failed to finish connecting to Pano Platform. Reason: ${failure.message}"))
 
             // The heartbeat only ever starts AFTER onConnectionEstablished() returns
             // successfully (below), so this is a no-op today - kept anyway since this is exactly
