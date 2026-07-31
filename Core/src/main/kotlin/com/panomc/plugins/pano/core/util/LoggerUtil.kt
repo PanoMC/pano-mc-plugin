@@ -21,15 +21,27 @@ object LoggerUtil {
     /**
      * Sets the log level for a specific logger name across known logging frameworks.
      *
+     * Every backend that is actually present is updated, rather than stopping at the first one
+     * that accepts the change: a caller cannot know which backend the log line it wants to quiet
+     * is really routed through (Vert.x's own LoggerFactory prefers SLF4J whenever that is on the
+     * classpath, and the SLF4J binding is then Log4j2 on Paper/Velocity/Fabric but Logback
+     * elsewhere), and setting a level for a logger name in an unused framework is a harmless
+     * no-op.
+     *
      * @param loggerName The full logger name (e.g. "io.vertx.core.http.impl.HttpClientConnectionInternal")
      * @param level The log level as string (e.g. "ERROR", "WARN", "INFO", "OFF")
+     * @return true if at least one logging backend accepted the change.
      */
-    fun setLoggerLevel(loggerName: String, level: String) {
-        if (trySetLog4j2(loggerName, level)) return
-        if (trySetLogback(loggerName, level)) return
-        if (trySetJavaUtilLogging(loggerName, level)) return
+    fun setLoggerLevel(loggerName: String, level: String): Boolean {
+        // Deliberately silent (no println): this runs during boot, and a utility whose whole job
+        // is to remove log noise must not add its own.
+        var applied = false
 
-        println("LoggerUtils: No supported logging framework found for $loggerName")
+        if (trySetLog4j2(loggerName, level)) applied = true
+        if (trySetLogback(loggerName, level)) applied = true
+        if (trySetJavaUtilLogging(loggerName, level)) applied = true
+
+        return applied
     }
 
     // --- Log4j2 ---
@@ -63,7 +75,6 @@ object LoggerUtil {
             }
 
             context.javaClass.getMethod("updateLoggers").invoke(context)
-            println("LoggerUtils: Set Log4j2 logger level -> $loggerName = $level")
             true
         } catch (_: ClassNotFoundException) {
             false
@@ -86,7 +97,6 @@ object LoggerUtil {
                 val desiredLevel = levelClass.getField(level.uppercase()).get(null)
                 logbackLoggerClass.getMethod("setLevel", levelClass)
                     .invoke(logbackLogger, desiredLevel)
-                println("LoggerUtils: Set Logback logger level -> $loggerName = $level")
                 true
             } else false
         } catch (_: ClassNotFoundException) {
@@ -110,7 +120,6 @@ object LoggerUtil {
                 else -> JULLevel.INFO
             }
             julLogger.level = julLevel
-            println("LoggerUtils: Set java.util.logging level -> $loggerName = $julLevel")
             true
         } catch (t: Throwable) {
             false

@@ -8,6 +8,7 @@ import com.panomc.plugins.pano.core.event.EventManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.platform.PlatformManager
+import com.panomc.plugins.pano.core.util.LoggerUtil
 import com.panomc.plugins.pano.core.util.deseriliazer.JsonObjectDeserializer
 import io.vertx.core.Vertx
 import io.vertx.core.VertxOptions
@@ -272,6 +273,9 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
 
     override suspend fun start() {
         stopping = false
+
+        quietVertxConnectionEvictionWarnings()
+
         logger.info(
             panoPluginMain.translateColor(
                 "&9\n" +
@@ -287,6 +291,24 @@ class Pano(private val panoPluginMain: PanoPluginMain) : CoroutineVerticle() {
         logger.info("Initializing Pano MC")
 
         init()
+    }
+
+    // Every rejected WebSocket upgrade to the platform costs one "Connection evicted" WARN from
+    // Vert.x internals, so a server that is simply waiting to be approved in the panel drips two
+    // lines per reconnect attempt into the console instead of one. The warning carries no
+    // information we don't already report ourselves: WebSocketGroup only installs its own eviction
+    // handler on a WebSocket it managed to open (see requestConnection2), so a handshake the
+    // platform refuses leaves the underlying Http1xClientConnection on
+    // HttpClientConnectionInternal.DEFAULT_EVICTION_HANDLER, whose sole job is to log that line
+    // when closeInternal() runs. Nothing on the public WebSocketClient API can replace that
+    // handler, so the noise is muted at the logger instead. Scoped to exactly that Vert.x class,
+    // and only down to ERROR: "Connection evicted" is the one and only message it ever emits
+    // (vertx-core 5.0.4), so nothing else is hidden and a future Vert.x that logs a real error
+    // there still gets through.
+    private fun quietVertxConnectionEvictionWarnings() {
+        if (!LoggerUtil.setLoggerLevel("io.vertx.core.http.impl.HttpClientConnectionInternal", "ERROR")) {
+            logger.fine("Could not quiet Vert.x connection eviction warnings: no known logging backend accepted the level change.")
+        }
     }
 
     override suspend fun stop() {
