@@ -2,14 +2,22 @@ package com.panomc.plugins.pano.fabric
 
 import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.command.Command
+import com.panomc.plugins.pano.core.console.ConsoleLine
+import com.panomc.plugins.pano.core.console.Log4j2ConsoleCapture
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.Integration
+import com.panomc.plugins.pano.core.files.RestorePending
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.integration.BanIntegration
 import com.panomc.plugins.pano.core.integration.PermissionIntegration
+import com.panomc.plugins.pano.core.metrics.TickSampler
+import com.panomc.plugins.pano.core.platform.Capability
+import com.panomc.plugins.pano.core.platform.entity.InstalledPlugin
+import com.panomc.plugins.pano.core.platform.entity.PlayerData
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage
+import com.panomc.plugins.pano.core.update.PanoSelfUpdate
 import io.vertx.core.http.WebSocket
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -17,12 +25,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import net.fabricmc.api.DedicatedServerModInitializer
+import net.fabricmc.loader.api.FabricLoader
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents
 import net.minecraft.server.MinecraftServer
 import java.io.File
 import java.util.logging.Logger
+import java.util.UUID
 
 class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     // Three distinct monitors, never `this`. lifecycleLock guards "swap my fields" state (mPano,
@@ -143,6 +154,11 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     // Bridge JUL → SLF4J so logs use Fabric's native format
     private val logger: Logger = FabricLogger("Pano")
 
+    // Never rebuilt across a server restart: it is pure wall-clock bookkeeping with no reference
+    // to the MinecraftServer, and a restart's tick gap is exactly what its "seconds without a
+    // tick count as zero" rule is there to record.
+    private val tickSampler = TickSampler()
+
     // Not `by lazy`: Fabric can restart the integrated server (SERVER_STOPPING then a fresh
     // SERVER_STARTED) without the mod itself reloading, so reusing the first-built integrations
     // would leave them wired to a torn-down Pano (their `pano by lazy { main.getPano() }` would
@@ -155,6 +171,21 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     private var integrations: List<Integration> = emptyList()
 
     override fun onInitializeServer() {
+        // Before the lifecycle callbacks are even registered: mod initialisation runs before the
+        // server loads its world, which is the window a restore needs (AGENT.md 2.4.17 C).
+        RestorePending.apply(getServerDirectory(), logger)
+
+        // A staged self-update the last shutdown could not swap in (the process was killed, or the
+        // jar was locked) is finished here; it loads on the next restart (AGENT.md B3).
+        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
+
+        // STOPPED rather than STOPPING: by then the worlds are saved and Pano is torn down, so
+        // nothing is still loading classes from the jar being replaced. Fabric has no update
+        // folder, so this is where a staged self-update swaps in, keeping the old jar as .bak.
+        ServerLifecycleEvents.SERVER_STOPPED.register { _ ->
+            PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
+        }
+
         ServerLifecycleEvents.SERVER_STARTED.register { server ->
             this.server = server
             serverData = FabricServerData(server)
@@ -280,6 +311,13 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
             }
         }
 
+        // One increment per tick on the server thread; the sampler turns it into 1/5/15-minute
+        // averages. Registered unconditionally because fabric-api events cannot be unregistered -
+        // getTps() returns null whenever no server is running, which is the state that matters.
+        ServerTickEvents.END_SERVER_TICK.register { _ ->
+            tickSampler.onTick()
+        }
+
         // Store dispatcher and register any commands already queued
         CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
             synchronized(registrationLock) {
@@ -297,6 +335,36 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
         }
         return dataDir
     }
+
+    /**
+     * The game directory, i.e. where `server.properties`, `mods/`, `logs/` and the world live.
+     *
+     * Taken from the loader rather than from the working directory, which a launcher is free to
+     * set to something else.
+     */
+    override fun getServerDirectory(): File = FabricLoader.getInstance().gameDir.toFile()
+
+    /**
+     * The mod jar in `mods/` this mod was loaded from, for a self-update to replace.
+     *
+     * Asked of the loader first, which records where every mod came from; the class's code source,
+     * the default, is the fallback for a loader too old to say. Only a plain jar on disk counts -
+     * a development run from a classes directory has nothing to replace.
+     */
+    override fun getOwnJarFile(): File? = try {
+        // "pano" is the id in fabric.mod.json.
+        FabricLoader.getInstance().getModContainer("pano").orElse(null)
+            ?.origin
+            ?.paths
+            ?.map { it.toFile() }
+            ?.firstOrNull { it.isFile && it.name.lowercase().endsWith(".jar") }
+            ?.absoluteFile
+    } catch (_: Throwable) {
+        null
+    } ?: super<PanoPluginMain>.getOwnJarFile()
+
+    /** Fabric loads mods, not plugins. */
+    override fun getPluginDirectoryName(): String = "mods"
 
     override fun getPanoLogger(): Logger = logger
 
@@ -596,6 +664,157 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
                 logger.warning("Integration ${it.javaClass.simpleName} failed to handle permissions snapshot update: ${e.message}")
             }
         }
+    }
+
+    override fun getCapabilities(): Set<Capability> = setOf(
+        Capability.CONSOLE,
+        Capability.COMMANDS,
+        Capability.METRICS,
+        Capability.PLAYERS,
+        Capability.POWER,
+        Capability.PLUGINS,
+        Capability.FILES,
+        Capability.BACKUPS,
+        Capability.PLUGIN_INSTALL,
+        Capability.SCHEDULES
+    )
+
+    // Read-only: Fabric mods are loaded before the game starts and cannot be toggled at runtime.
+    override fun getInstalledPlugins(): List<InstalledPlugin> = try {
+        FabricLoader.getInstance().allMods.map { container ->
+            val metadata = container.metadata
+
+            InstalledPlugin(
+                name = metadata.name?.takeIf { it.isNotBlank() } ?: metadata.id,
+                version = metadata.version?.friendlyString ?: "unknown",
+                authors = metadata.authors.mapNotNull { it.name },
+                description = metadata.description?.takeIf { it.isNotBlank() },
+                enabled = true,
+                file = null
+            )
+        }
+    } catch (exception: Throwable) {
+        logger.fine("Could not read the installed mod list: ${exception.javaClass.simpleName}: ${exception.message}")
+
+        emptyList()
+    }
+
+    override fun shutdown() {
+        val server = this.server ?: return
+
+        // halt(false) is the Mojang-mapped name of the graceful "stop the server" call; false
+        // means "do not block this thread waiting for the shutdown to finish", which matters
+        // because this runs on the server thread itself.
+        server.execute {
+            try {
+                server.halt(false)
+            } catch (exception: Throwable) {
+                logger.severe("Failed to stop the server: ${exception.javaClass.simpleName}: ${exception.message}")
+            }
+        }
+    }
+
+    override fun restart() {
+        logger.warning("Minecraft has no restart API; stopping the server instead. It only comes back if the host runs it under a restart loop.")
+
+        shutdown()
+    }
+
+    // MinecraftServer exposes the mean tick time directly, but nothing equivalent for TPS, hence
+    // the sampler fed by END_SERVER_TICK in onInitializeServer().
+    override fun getTps(): DoubleArray? = if (server == null) null else tickSampler.getTps()
+
+    override fun getMspt(): Double? = try {
+        server?.getAverageTickTimeNanos()?.let { it / 1_000_000.0 }
+    } catch (_: Throwable) {
+        null
+    }
+
+    override fun getOnlinePlayers(): List<PlayerData> {
+        val server = this.server ?: return emptyList()
+
+        return try {
+            val playerList = server.getPlayerList()
+
+            playerList.getPlayers().map {
+                val nameAndId = it.nameAndId()
+
+                PlayerData(
+                    it.getUUID().toString(),
+                    it.getGameProfile().name,
+                    it.connection.latency().toLong(),
+                    op = playerList.isOp(nameAndId),
+                    // The list itself: PlayerList.isWhiteListed() answers "may join", which is true for
+                    // everyone while the whitelist is off and for every op.
+                    whitelisted = playerList.getWhiteList().isWhiteListed(nameAndId),
+                    gamemode = it.gameMode().getName()
+                )
+            }
+        } catch (exception: Throwable) {
+            logger.fine("Could not read the online roster: ${exception.javaClass.simpleName}: ${exception.message}")
+
+            emptyList()
+        }
+    }
+
+    // Minecraft's own console is log4j-core; the mod never links it directly.
+    override fun installConsoleCapture(sink: (ConsoleLine) -> Unit): AutoCloseable? =
+        Log4j2ConsoleCapture.install(sink)
+
+    override fun dispatchConsoleCommand(command: String) {
+        val server = this.server ?: return
+
+        // MinecraftServer.execute() queues onto the server thread, the only one allowed to touch
+        // world state. performPrefixedCommand tolerates a leading slash; the core handler has
+        // already removed it.
+        server.execute {
+            try {
+                server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command)
+            } catch (exception: Throwable) {
+                logger.warning("Console command from Pano failed: ${exception.javaClass.simpleName}: ${exception.message}")
+            }
+        }
+    }
+
+    /**
+     * Pauses or resumes world autosaving through the vanilla console commands.
+     *
+     * `save-off`/`save-all`/`save-on` rather than the server's own API: the mapped names of the
+     * save methods move between Minecraft versions, while these three commands have not changed
+     * since they were introduced and go through the same dispatcher every other command from Pano
+     * does.
+     */
+    override fun setWorldSaving(enabled: Boolean): Boolean {
+        if (server == null) {
+            return false
+        }
+
+        if (enabled) {
+            dispatchConsoleCommand("save-on")
+        } else {
+            dispatchConsoleCommand("save-off")
+            dispatchConsoleCommand("save-all flush")
+        }
+
+        return true
+    }
+
+    override fun sendPlayerMessage(uuid: String, username: String, message: String): Boolean {
+        val server = this.server ?: return false
+        val playerList = server.getPlayerList()
+        val target = runCatching { playerList.getPlayer(UUID.fromString(uuid)) }.getOrNull()
+            ?: playerList.getPlayerByName(username)
+            ?: return false
+
+        server.execute {
+            try {
+                target.sendSystemMessage(FabricTextHelper.parseColoredText(message))
+            } catch (_: Exception) {
+                // The player left between the lookup and the main thread picking this up.
+            }
+        }
+
+        return true
     }
 
     override fun kickPlayer(player: String, message: String) {

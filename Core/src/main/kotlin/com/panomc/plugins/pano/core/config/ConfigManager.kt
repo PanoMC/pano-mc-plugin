@@ -4,6 +4,7 @@ import com.panomc.plugins.pano.core.config.migration.ConfigMigration1To2
 import com.panomc.plugins.pano.core.config.migration.ConfigMigration2To3
 import com.panomc.plugins.pano.core.config.migration.ConfigMigration3To4
 import com.panomc.plugins.pano.core.config.migration.ConfigMigration4To5
+import com.panomc.plugins.pano.core.config.migration.ConfigMigration5To6
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 import com.typesafe.config.ConfigRenderOptions
@@ -195,7 +196,8 @@ class ConfigManager(vertx: Vertx, private val logger: Logger, dataFolder: File) 
         ConfigMigration1To2(),
         ConfigMigration2To3(),
         ConfigMigration3To4(),
-        ConfigMigration4To5()
+        ConfigMigration4To5(),
+        ConfigMigration5To6()
     )
 
     private val configFile = File(dataFolder.path + "/config.conf")
@@ -280,8 +282,10 @@ class ConfigManager(vertx: Vertx, private val logger: Logger, dataFolder: File) 
     }
 
     private fun updateConfig(newConfig: JsonObject) {
-        config = PanoConfig.from(newConfig)
-        configJsonObject = newConfig.copy()
+        val filled = withDefaultHeartbeat(newConfig)
+
+        config = PanoConfig.from(filled)
+        configJsonObject = filled
     }
 
     /**
@@ -296,6 +300,28 @@ class ConfigManager(vertx: Vertx, private val logger: Logger, dataFolder: File) 
     fun close() {
         configRetriever.close().onFailure { cause ->
             logger.warning("Failed to close config retriever: $cause")
+        }
+    }
+
+    companion object {
+        /**
+         * [config] with the heartbeat keys filled in when the file does not have them.
+         *
+         * A config.conf can be at the newest version without them: a pano-node older than the fix
+         * wrote managed servers' files straight at version 6, so migration 4 to 5, which is what
+         * adds them, never ran. Gson builds [PanoConfig] without its constructor and reads a missing
+         * Int as 0, which the heartbeat check then rejected with a warning on every start - the
+         * defaults were used anyway, so this only makes that silent and puts the keys back in the
+         * file on the next save.
+         */
+        internal fun withDefaultHeartbeat(config: JsonObject): JsonObject = config.copy().apply {
+            if (!containsKey("heartbeat-interval")) {
+                put("heartbeat-interval", PanoConfig.DEFAULT_HEARTBEAT_INTERVAL_SECONDS)
+            }
+
+            if (!containsKey("heartbeat-timeout")) {
+                put("heartbeat-timeout", PanoConfig.DEFAULT_HEARTBEAT_TIMEOUT_SECONDS)
+            }
         }
     }
 }

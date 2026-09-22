@@ -3,12 +3,19 @@ package com.panomc.plugins.pano.velocity
 import com.google.inject.Inject
 import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.command.Command
+import com.panomc.plugins.pano.core.console.ConsoleLine
+import com.panomc.plugins.pano.core.console.Log4j2ConsoleCapture
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.Integration
+import com.panomc.plugins.pano.core.files.RestorePending
+import com.panomc.plugins.pano.core.update.PanoSelfUpdate
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.integration.BanIntegration
 import com.panomc.plugins.pano.core.integration.PermissionIntegration
+import com.panomc.plugins.pano.core.platform.Capability
+import com.panomc.plugins.pano.core.platform.entity.InstalledPlugin
+import com.panomc.plugins.pano.core.platform.entity.PlayerData
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage
 import com.panomc.plugins.pano.core.util.LegacyColorConverter
@@ -32,6 +39,7 @@ import java.io.File
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.logging.Logger
+import java.util.UUID
 
 class VelocityMain : PanoPluginMain {
     // panoInitLock is held by getPano() ONLY -- across its entire body, including the blocking
@@ -139,12 +147,25 @@ class VelocityMain : PanoPluginMain {
 
     @Subscribe
     fun onProxyInitialize(event: ProxyInitializeEvent) {
+        // Before anything else this plugin does: a proxy has no worlds to be careful about, so
+        // the first init callback is as early as a restore can be applied (AGENT.md 2.4.17 C).
+        RestorePending.apply(getServerDirectory(), logger)
+
+        // A staged self-update the last shutdown could not swap in (the process was killed, or the
+        // jar was locked) is finished here; it loads on the next restart (AGENT.md B3).
+        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
+
         onEnable()
     }
 
     @Subscribe
     fun onProxyShutdown(event: ProxyShutdownEvent) {
         onDisable()
+
+        // Only on a real shutdown, never on the reload below: Velocity has no update folder, so a
+        // staged self-update replaces this plugin's own jar here, after Pano is fully torn down,
+        // keeping the old one as .bak (AGENT.md B3).
+        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
     }
 
     @Subscribe
@@ -154,6 +175,15 @@ class VelocityMain : PanoPluginMain {
     }
 
     override fun getDataFolder(): File = dataFolder.toFile()
+
+    /**
+     * The proxy root, i.e. where `velocity.toml`, `plugins/` and `logs/` live.
+     *
+     * The data folder Velocity injects is `plugins/pano` inside the proxy directory, so two steps
+     * up is the proxy itself - which is the directory those sit in however the proxy was started.
+     */
+    override fun getServerDirectory(): File =
+        dataFolder.toFile().absoluteFile.parentFile?.parentFile ?: File(".")
 
     override fun getPanoLogger(): Logger = logger
 
@@ -519,6 +549,86 @@ class VelocityMain : PanoPluginMain {
                 logger.warning("Integration ${it.javaClass.simpleName} failed to handle permissions snapshot update: ${failure.message}")
             }
         }
+    }
+
+    override fun getCapabilities(): Set<Capability> = setOf(
+        Capability.CONSOLE,
+        Capability.COMMANDS,
+        Capability.METRICS,
+        Capability.PLAYERS,
+        Capability.POWER,
+        Capability.PLUGINS,
+        Capability.FILES,
+        Capability.BACKUPS,
+        Capability.PLUGIN_INSTALL,
+        Capability.SCHEDULES
+    )
+
+    // Read-only: Velocity loads plugins once at boot and has no enable/disable API, so every
+    // entry reports enabled = true and setPluginEnabled() keeps the interface's false default.
+    override fun getInstalledPlugins(): List<InstalledPlugin> = try {
+        server.pluginManager.plugins.map { container ->
+            val description = container.description
+
+            InstalledPlugin(
+                name = description.name.orElse(description.id),
+                version = description.version.orElse("unknown"),
+                authors = description.authors,
+                description = description.description.orElse(null),
+                enabled = true,
+                file = description.source.map { it.fileName.toString() }.orElse(null)
+            )
+        }
+    } catch (exception: Throwable) {
+        logger.fine("Could not read the installed plugin list: ${exception.javaClass.simpleName}: ${exception.message}")
+
+        emptyList()
+    }
+
+    override fun shutdown() {
+        server.shutdown()
+    }
+
+    override fun restart() {
+        logger.warning("Velocity has no restart API; shutting the proxy down instead. It only comes back if the host runs it under a restart loop.")
+
+        shutdown()
+    }
+
+    // A proxy has no world and therefore no tick loop: getTps()/getMspt() stay at the interface's
+    // null default and Pano renders them as "not applicable" rather than as zero.
+    override fun getOnlinePlayers(): List<PlayerData> = try {
+        server.allPlayers.map { PlayerData(it.uniqueId.toString(), it.username, it.ping) }
+    } catch (exception: Throwable) {
+        logger.fine("Could not read the online roster: ${exception.javaClass.simpleName}: ${exception.message}")
+
+        emptyList()
+    }
+
+    // Velocity renders its console through log4j-core, which it does not expose to plugins.
+    override fun installConsoleCapture(sink: (ConsoleLine) -> Unit): AutoCloseable? =
+        Log4j2ConsoleCapture.install(sink)
+
+    override fun dispatchConsoleCommand(command: String) {
+        try {
+            // executeAsync hands the command to Velocity's own command thread; the returned
+            // future is deliberately not awaited - the command's output reaches the panel through
+            // the console stream, not through a reply.
+            server.commandManager.executeAsync(server.consoleCommandSource, command)
+        } catch (exception: Throwable) {
+            logger.warning("Console command from Pano failed: ${exception.javaClass.simpleName}: ${exception.message}")
+        }
+    }
+
+    override fun sendPlayerMessage(uuid: String, username: String, message: String): Boolean {
+        val target = runCatching { server.getPlayer(UUID.fromString(uuid)).orElse(null) }.getOrNull()
+            ?: server.getPlayer(username).orElse(null)
+            ?: return false
+
+        // Same reason as kickPlayer: a Component, not translateColor()'s console ANSI.
+        target.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(message))
+
+        return true
     }
 
     override fun kickPlayer(player: String, message: String) {

@@ -17,6 +17,11 @@ data class PanoConfig(
     // settings, not connection identity/state like PlatformConfig below.
     @SerializedName("heartbeat-interval") var heartbeatInterval: Int = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     @SerializedName("heartbeat-timeout") var heartbeatTimeout: Int = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
+    // Nullable like `platform` below, and for the same reason: Gson instantiates PanoConfig
+    // through Unsafe (PanoConfig has no no-arg constructor), so a key missing from config.conf
+    // lands here as null rather than as this default. Readers must treat null as "use the
+    // default", never dereference it.
+    var console: ConsoleConfig? = ConsoleConfig(),
     var platform: PlatformConfig? = PlatformConfig(),
 ) {
     companion object {
@@ -29,6 +34,17 @@ data class PanoConfig(
         // (platform-core-heartbeat).
         const val DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 25
         const val DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 75
+
+        /**
+         * Master switch for the console feature (config version 6).
+         *
+         * `false` means no log capture is installed at all and `CONSOLE_STREAM` is ignored, so an
+         * operator who does not want their server log leaving the machine can turn the whole
+         * thing off without disconnecting from Pano.
+         */
+        data class ConsoleConfig(
+            var enabled: Boolean = true
+        )
 
         data class PlatformConfig(
             var host: String = "",

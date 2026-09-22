@@ -2,12 +2,19 @@ package com.panomc.plugins.pano.bungee
 
 import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.command.Command
+import com.panomc.plugins.pano.core.console.ConsoleLine
+import com.panomc.plugins.pano.core.console.JulConsoleCapture
 import com.panomc.plugins.pano.core.event.Listener
 import com.panomc.plugins.pano.core.helper.Integration
+import com.panomc.plugins.pano.core.files.RestorePending
+import com.panomc.plugins.pano.core.update.PanoSelfUpdate
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.integration.BanIntegration
 import com.panomc.plugins.pano.core.integration.PermissionIntegration
+import com.panomc.plugins.pano.core.platform.Capability
+import com.panomc.plugins.pano.core.platform.entity.InstalledPlugin
+import com.panomc.plugins.pano.core.platform.entity.PlayerData
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.message.response.PermissionsSnapshotUpdatedMessage
 import io.vertx.core.http.WebSocket
@@ -23,7 +30,9 @@ import net.md_5.bungee.api.scheduler.ScheduledTask
 
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.TimeUnit
+import java.io.File
 import java.util.logging.Logger
+import java.util.UUID
 
 class BungeeMain : Plugin(), PanoPluginMain {
     // panoInitLock is held by getPano() ONLY -- across its entire body, including the blocking
@@ -127,6 +136,14 @@ class BungeeMain : Plugin(), PanoPluginMain {
     private var integrations: List<Integration> = emptyList()
 
     override fun onEnable() {
+        // First, before the proxy has read anything this could be replacing: a proxy has no
+        // worlds, so its enable step is as early as a restore can be applied (AGENT.md 2.4.17 C).
+        RestorePending.apply(getServerDirectory(), logger)
+
+        // A staged self-update the last shutdown could not swap in (the process was killed, or the
+        // jar was locked) is finished here; it loads on the next restart (AGENT.md B3).
+        PanoSelfUpdate.applyPendingSwap(dataFolder, logger)
+
         coroutineScope = CoroutineScope(
             SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, throwable ->
                 logger.warning("Unhandled coroutine exception: ${throwable.message}")
@@ -227,6 +244,10 @@ class BungeeMain : Plugin(), PanoPluginMain {
         if (::coroutineScope.isInitialized) {
             coroutineScope.cancel()
         }
+
+        // After everything else, with Vert.x closed: BungeeCord has no update folder, so a staged
+        // self-update replaces this plugin's own jar now, keeping the old one as .bak (AGENT.md B3).
+        PanoSelfUpdate.applyPendingSwap(dataFolder, logger)
     }
 
     override fun registerCommands(commands: List<Command>) {
@@ -294,6 +315,15 @@ class BungeeMain : Plugin(), PanoPluginMain {
             bungeeEventListener.listeners.removeAll(listeners)
         }
     }
+
+    /**
+     * The proxy root, next to the proxy jar.
+     *
+     * BungeeCord's data folder is `plugins/Pano`, so the proxy directory is two steps up. Vanilla
+     * BungeeCord writes `proxy.log` into that root instead of into `logs/`, which Waterfall uses;
+     * a missing log directory simply means no history, which is what the reader reports.
+     */
+    override fun getServerDirectory(): File = dataFolder.absoluteFile.parentFile?.parentFile ?: File(".")
 
     override fun getPanoLogger(): Logger = logger
 
@@ -414,6 +444,91 @@ class BungeeMain : Plugin(), PanoPluginMain {
                 logger.warning("Integration ${it.javaClass.simpleName} failed to handle permissions snapshot update: ${exception.message}")
             }
         }
+    }
+
+    override fun getCapabilities(): Set<Capability> = setOf(
+        Capability.CONSOLE,
+        Capability.COMMANDS,
+        Capability.METRICS,
+        Capability.PLAYERS,
+        Capability.POWER,
+        Capability.PLUGINS,
+        Capability.FILES,
+        Capability.BACKUPS,
+        Capability.PLUGIN_INSTALL,
+        Capability.SCHEDULES
+    )
+
+    // Read-only, same as Velocity: BungeeCord has no enable/disable API for a loaded plugin.
+    override fun getInstalledPlugins(): List<InstalledPlugin> = try {
+        proxy.pluginManager.plugins.map { plugin ->
+            val description = plugin.description
+
+            InstalledPlugin(
+                name = description.name,
+                version = description.version ?: "unknown",
+                authors = listOfNotNull(description.author),
+                description = description.description,
+                enabled = true,
+                file = description.file?.name
+            )
+        }
+    } catch (exception: Throwable) {
+        logger.fine("Could not read the installed plugin list: ${exception.javaClass.simpleName}: ${exception.message}")
+
+        emptyList()
+    }
+
+    override fun shutdown() {
+        proxy.stop()
+    }
+
+    override fun restart() {
+        logger.warning("BungeeCord has no restart API; stopping the proxy instead. It only comes back if the host runs it under a restart loop.")
+
+        shutdown()
+    }
+
+    // Same as Velocity: a proxy has no tick loop, so TPS and MSPT stay null.
+    override fun getOnlinePlayers(): List<PlayerData> = try {
+        proxy.players.map { PlayerData(it.uniqueId.toString(), it.name, it.ping.toLong()) }
+    } catch (exception: Throwable) {
+        logger.fine("Could not read the online roster: ${exception.javaClass.simpleName}: ${exception.message}")
+
+        emptyList()
+    }
+
+    // The one platform that is not log4j-core: BungeeCord logs through its own java.util.logging
+    // logger (plus jline). Plugin loggers have the proxy logger as their parent, so a handler here
+    // sees the proxy's lines and every plugin's.
+    override fun installConsoleCapture(sink: (ConsoleLine) -> Unit): AutoCloseable? =
+        JulConsoleCapture.install(proxy.logger, sink)
+
+    override fun dispatchConsoleCommand(command: String) {
+        try {
+            // BungeeCord has no main thread to hop onto, but a command must still not run on the
+            // Vert.x event loop that delivered the message: a plugin command that blocks would
+            // stall the platform connection itself.
+            proxy.scheduler.runAsync(this) {
+                try {
+                    proxy.pluginManager.dispatchCommand(proxy.console, command)
+                } catch (exception: Throwable) {
+                    logger.warning("Console command from Pano failed: ${exception.javaClass.simpleName}: ${exception.message}")
+                }
+            }
+        } catch (exception: Throwable) {
+            logger.warning("Could not schedule console command from Pano: ${exception.javaClass.simpleName}: ${exception.message}")
+        }
+    }
+
+    override fun sendPlayerMessage(uuid: String, username: String, message: String): Boolean {
+        val target = runCatching { proxy.getPlayer(UUID.fromString(uuid)) }.getOrNull()
+            ?: proxy.getPlayer(username)
+            ?: return false
+
+        target.sendMessage(TextComponent(translateColor(message)))
+
+        return true
     }
 
     override fun kickPlayer(player: String, message: String) {

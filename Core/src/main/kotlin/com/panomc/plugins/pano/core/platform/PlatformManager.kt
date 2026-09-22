@@ -3,18 +3,58 @@ package com.panomc.plugins.pano.core.platform
 import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.config.PanoConfig
+import com.panomc.plugins.pano.core.console.ConsoleStreamer
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.i18n.I18nManager
 import com.panomc.plugins.pano.core.mcping.McStatus
+import com.panomc.plugins.pano.core.metrics.MetricsReporter
 import com.panomc.plugins.pano.core.mcping.MinecraftStatusClient
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformMessage.Companion.responseName
 import com.panomc.plugins.pano.core.platform.message.handler.BanPlayerHandler
+import com.panomc.plugins.pano.core.platform.message.handler.ConsoleHistoryHandler
+import com.panomc.plugins.pano.core.platform.message.handler.ConsoleSearchHandler
+import com.panomc.plugins.pano.core.platform.message.handler.ConsoleStreamHandler
+import com.panomc.plugins.pano.core.platform.message.handler.SetMetricsIntervalHandler
+import com.panomc.plugins.pano.core.files.BackupService
+import com.panomc.plugins.pano.core.files.FileAgent
+import com.panomc.plugins.pano.core.files.RestorePending
+import com.panomc.plugins.pano.core.files.TransferService
+import com.panomc.plugins.pano.core.schedule.ScheduleRunner
+import com.panomc.plugins.pano.core.schedule.ScheduleStore
+import com.panomc.plugins.pano.core.task.PluginInstallService
+import com.panomc.plugins.pano.core.update.SelfUpdateService
+import com.panomc.plugins.pano.core.platform.message.handler.PanoPluginUpdateHandler
+import com.panomc.plugins.pano.core.task.TaskReporter
+import com.panomc.plugins.pano.core.platform.message.handler.BackupCreateHandler
+import com.panomc.plugins.pano.core.platform.message.handler.BackupDeleteHandler
+import com.panomc.plugins.pano.core.platform.message.handler.BackupListHandler
+import com.panomc.plugins.pano.core.platform.message.handler.BackupRestoreHandler
+import com.panomc.plugins.pano.core.platform.message.handler.ExecuteCommandHandler
+import com.panomc.plugins.pano.core.platform.message.handler.PlayerActionHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileArchiveHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileChmodHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileDeleteHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileHashesHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileListHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileMkdirHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileReadHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileRenameHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileUnarchiveHandler
+import com.panomc.plugins.pano.core.platform.message.handler.FileWriteHandler
 import com.panomc.plugins.pano.core.platform.message.handler.GetServerSettingsHandler
+import com.panomc.plugins.pano.core.platform.message.handler.InstallPluginHandler
 import com.panomc.plugins.pano.core.platform.message.handler.PermissionsSnapshotUpdatedHandler
+import com.panomc.plugins.pano.core.platform.message.handler.PowerHandler
+import com.panomc.plugins.pano.core.platform.message.handler.SetPluginEnabledHandler
+import com.panomc.plugins.pano.core.platform.message.handler.SyncSchedulesHandler
+import com.panomc.plugins.pano.core.platform.message.handler.TransferPullHandler
+import com.panomc.plugins.pano.core.platform.message.handler.TransferPushHandler
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
 import com.panomc.plugins.pano.core.platform.request.GetServerSettingsRequest
+import com.panomc.plugins.pano.core.platform.request.InstalledPluginsRequest
+import com.panomc.plugins.pano.core.platform.request.BackupRestoredRequest
 import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
 import com.panomc.plugins.pano.core.util.Aes256GcmUtil
 import com.panomc.plugins.pano.core.util.EncryptUtil
@@ -162,10 +202,120 @@ class PlatformManager(
         Base64.getDecoder()
     }
 
+    /**
+     * Captures the server console and batches it towards Pano.
+     *
+     * Declared before [messageHandlerDefinitions] on purpose: the handlers below are built in this
+     * class's initializer and take this streamer, so it has to be assigned first. It is wired with
+     * plain lambdas rather than through the DI container because the streamer needs to send
+     * through this manager while this manager owns the streamer's lifecycle - a cycle Spring
+     * cannot resolve and does not need to.
+     */
+    internal val consoleStreamer = ConsoleStreamer(
+        vertx,
+        logger,
+        configManager,
+        pluginMain,
+        ::sendMessage
+    ) { webSocket != null }
+
+    /**
+     * Pushes a health sample to Pano every ten seconds. Wired with the same lambdas, and for the
+     * same reason, as [consoleStreamer] above.
+     */
+    internal val metricsReporter = MetricsReporter(
+        vertx,
+        logger,
+        pluginMain,
+        serverData,
+        ::sendMessage
+    ) { webSocket != null }
+
+    /**
+     * Answers Pano's file manager from inside the server directory (AGENT.md 2.4.17 C).
+     *
+     * Wired with the same lambdas, and for the same reason, as [consoleStreamer] above.
+     */
+    internal val fileAgent = FileAgent(pluginMain, ::sendMessage, logger)
+
+    /** Reports long jobs - backups, plugin installs - as `TASK_PROGRESS` frames. */
+    internal val taskReporter = TaskReporter(::sendMessage, logger)
+
+    /**
+     * Copies this server's directory on request, and arms a restore for the next start
+     * (AGENT.md 2.4.17 C).
+     */
+    internal val backupService = BackupService(pluginMain, taskReporter, ::sendMessage, logger)
+
+    /**
+     * Streams whole files to and from Pano under the tickets it issues (AGENT.md 2.4.4).
+     *
+     * Its own HTTP client rather than the WebSocket: a world is far too big for a frame, and the
+     * ticket endpoint is the same one the node daemon uses. `@backup/<id>` is the one path that
+     * does not mean a file inside the server, which is how a backup is downloaded.
+     */
+    internal val transferService = TransferService(configManager, pluginMain, logger) { path ->
+        backupService.resolveVirtual(path)
+    }
+
+    /** Downloads plugin and mod jars Pano picked out into this server (AGENT.md 2.4.5). */
+    internal val pluginInstallService = PluginInstallService(pluginMain, configManager, taskReporter, logger)
+
+    /**
+     * Fetches, verifies and stages this plugin's own successor when Pano offers one (AGENT.md B3).
+     *
+     * Wired with the same lambdas, and for the same reason, as [consoleStreamer] above.
+     */
+    internal val selfUpdateService = SelfUpdateService(pluginMain, configManager, taskReporter, ::sendMessage, logger)
+
+    /**
+     * Runs this server's own schedules, a minute at a time (AGENT.md 2.4.6).
+     *
+     * Its backups go through the file agent's lock like every other heavy file job, so a 04:00
+     * backup and a panel user unpacking an archive can never be reading and rewriting the same
+     * directory at once.
+     */
+    internal val scheduleRunner = ScheduleRunner(
+        vertx,
+        pluginMain,
+        ScheduleStore(pluginMain.getDataFolder(), logger),
+        ::sendMessage,
+        logger
+    ) { message ->
+        fileAgent.serialised { backupService.create(message) }
+    }
+
     internal val messageHandlerDefinitions = mutableSetOf<PlatformMessageHandler<*>>(
         GetServerSettingsHandler(this, pluginMain),
         BanPlayerHandler(this, pluginMain),
-        PermissionsSnapshotUpdatedHandler(pluginMain)
+        PermissionsSnapshotUpdatedHandler(pluginMain),
+        ConsoleStreamHandler(consoleStreamer),
+        SetMetricsIntervalHandler(metricsReporter),
+        ConsoleHistoryHandler(this, consoleStreamer, pluginMain, logger),
+        ConsoleSearchHandler(this, consoleStreamer, pluginMain, logger),
+        ExecuteCommandHandler(consoleStreamer, pluginMain, logger),
+        PlayerActionHandler(pluginMain, logger),
+        PowerHandler(pluginMain, logger),
+        SetPluginEnabledHandler(this, pluginMain, logger),
+        FileListHandler(fileAgent),
+        FileReadHandler(fileAgent),
+        FileWriteHandler(fileAgent),
+        FileMkdirHandler(fileAgent),
+        FileDeleteHandler(fileAgent),
+        FileRenameHandler(fileAgent),
+        FileArchiveHandler(fileAgent),
+        FileUnarchiveHandler(fileAgent),
+        FileChmodHandler(fileAgent),
+        FileHashesHandler(fileAgent),
+        TransferPullHandler(fileAgent, transferService, logger),
+        TransferPushHandler(fileAgent, transferService, logger),
+        BackupCreateHandler(fileAgent, backupService, logger),
+        BackupListHandler(fileAgent, backupService, logger),
+        BackupDeleteHandler(fileAgent, backupService, logger),
+        BackupRestoreHandler(fileAgent, backupService, logger),
+        InstallPluginHandler(fileAgent, this, pluginInstallService, logger),
+        SyncSchedulesHandler(scheduleRunner, logger),
+        PanoPluginUpdateHandler(selfUpdateService, logger)
     )
 
     val connectPlatformTask: (delay: Boolean, async: Boolean) -> Unit by lazy {
@@ -270,6 +420,20 @@ class PlatformManager(
     }
 
     fun start() {
+        // Before every early return below: the console ring buffer is worth filling even on a
+        // server that is not connected yet, so the first panel subscriber gets scrollback rather
+        // than an empty screen. It is a no-op when console.enabled is false.
+        consoleStreamer.start()
+
+        // The reporter skips every tick where the socket is down, so it is equally safe to start
+        // it here, ahead of the early returns below, and it needs no connect/disconnect wiring.
+        metricsReporter.start()
+
+        // Ahead of the early returns for a stronger reason than the two above: the schedules this
+        // server was last told about are on disk, and a nightly restart is exactly the thing that
+        // must still happen while Pano is unreachable.
+        scheduleRunner.start()
+
         logger.info(pluginMain.translateColor("Checking is platform connection configured"))
 
         if (!isPlatformConfigured()) {
@@ -320,6 +484,13 @@ class PlatformManager(
         // (platform-core-heartbeat). Cancelling an already-stopped/never-started timer is a
         // harmless no-op.
         cancelHeartbeat()
+
+        // Same belt-and-braces reasoning, and for a stronger reason: the console capture is a log
+        // appender installed on the SERVER's logger, so leaving it behind would outlive the
+        // plugin's classloader entirely.
+        consoleStreamer.stop()
+        metricsReporter.stop()
+        scheduleRunner.stop()
 
         // Fail everything still parked in sendMessageAwaitResponse instead of leaving those
         // callers awaiting forever (platform-core-2).
@@ -693,7 +864,26 @@ class PlatformManager(
         return ConnectOutcome.CONNECTED
     }
 
+    /**
+     * What this server tells Pano it can do: everything the platform implements, minus whatever
+     * the operator has switched off in config.conf (see [CapabilityFilter]).
+     *
+     * Read fresh on every connect instead of being cached, so a `console.enabled` flipped at
+     * runtime (the config manager reloads live) is announced correctly on the next reconnect
+     * without the operator having to restart the server.
+     */
+    internal fun announcedCapabilities(): Set<Capability> {
+        val announced = CapabilityFilter.filter(pluginMain.getCapabilities(), consoleStreamer.isEnabled())
+
+        // Decided here rather than listed by each platform main: whether this plugin can replace
+        // itself depends on whether it can name the jar it runs from, not on which platform it is.
+        return if (selfUpdateService.isSupported()) announced + Capability.SELF_UPDATE else announced
+    }
+
     private suspend fun onConnectionEstablished() {
+        // Every connection starts at the default cadence, whatever the last one was told.
+        metricsReporter.resetInterval()
+
         val pingData = queryServerStatus()
 
         val eventRequest = OnServerConnectRequest(
@@ -710,12 +900,31 @@ class PlatformManager(
                     ImageUtil.bufferedImageToDataUrl(pingData.faviconImage ?: serverData.favicon()!!)
                 else null
             ),
-            serverData.motd()
+            serverData.motd(),
+            Protocol.VERSION,
+            Pano.VERSION,
+            announcedCapabilities().map { it.id },
+            // The zone the server's own log lines are stamped in (AGENT.md 2.4.25). Never allowed
+            // to cost the handshake: a broken tz database just means Pano shows its own zone.
+            try {
+                java.time.ZoneId.systemDefault().id
+            } catch (_: Throwable) {
+                null
+            }
         )
 
         sendMessage(eventRequest)
 
         logger.info(pluginMain.translateColor("Sent server info update to the platform."))
+
+        // Right after ON_SERVER_CONNECT, so Pano's plugin list is populated before the panel can
+        // ask for it (AGENT.md 2.4.2). Fire-and-forget: it must never hold up the handshake.
+        sendInstalledPlugins()
+
+        // A restore that was armed for this start has already happened, before a world was read
+        // and long before there was a socket to say so on; this is the first moment there is one
+        // (AGENT.md 2.4.17 C).
+        sendPendingRestoreReport()
 
         serverSettings = sendMessageAwaitResponse(GetServerSettingsRequest(), GetServerSettingsMessage::class.java)
 
@@ -743,7 +952,9 @@ class PlatformManager(
             val event = json.getString("event")
             json.remove("event")
 
-            eventId = if (json.getString("eventId") == null) null else UUID.fromString(json.getString("eventId"))
+            val rawEventId = json.getString("eventId")
+
+            eventId = if (rawEventId == null) null else UUID.fromString(rawEventId)
 
             json.remove("eventId")
 
@@ -761,6 +972,13 @@ class PlatformManager(
                 }
 
                 return
+            }
+
+            // Not a response to something this plugin asked for, so it is a push - and a push can
+            // still be a question (`CONSOLE_HISTORY`), whose answer has to carry the same id back.
+            // The id is removed above for the pending-response path, so put it back for handlers.
+            if (rawEventId != null) {
+                json.put("eventId", rawEventId)
             }
 
             messageHandlerDefinitions.find { it.getHandlerName() == event }?.let {
@@ -792,6 +1010,14 @@ class PlatformManager(
         // Fail everything still parked in sendMessageAwaitResponse instead of leaving those
         // callers awaiting forever (platform-core-2).
         failAllPendingResponses(PanoError("&cLost connection to Pano Platform."))
+
+        // Stop streaming, keep buffering: the lines produced while the connection is down are
+        // exactly the ones an operator wants to see once it comes back (AGENT.md 2.4.1).
+        consoleStreamer.onDisconnect()
+
+        // A faster metrics cadence was a lease from the Pano that just went away; the next one
+        // asks again if a panel is still watching (AGENT.md 2.4.23).
+        metricsReporter.resetInterval()
 
         // Notify integrations to unregister their events
         pluginMain.onDisconnect()
@@ -1080,6 +1306,46 @@ class PlatformManager(
                 encryptionKey = Aes256GcmUtil.base64ToSecretKey(encodedKey)
                 encryptionKeySource = encodedKey
             }
+        }
+    }
+
+    /**
+     * Pushes the current `INSTALLED_PLUGINS` list, optionally after [delayMillis].
+     *
+     * The delay exists for the `SET_PLUGIN_ENABLED` path: that toggle is queued onto the server's
+     * main thread, so an immediate list would still show the old state.
+     */
+    internal fun sendInstalledPlugins(delayMillis: Long = 0) {
+        if (delayMillis > 0) {
+            vertx.setTimer(delayMillis) { sendInstalledPlugins() }
+
+            return
+        }
+
+        if (webSocket == null) {
+            return
+        }
+
+        try {
+            sendMessage(InstalledPluginsRequest(pluginMain.getInstalledPlugins()))
+        } catch (exception: Exception) {
+            logger.warning("Failed to send the installed plugin list: ${exception.javaClass.simpleName}: ${exception.message}")
+        }
+    }
+
+    /**
+     * Tells Pano how the restore applied on this start went, once.
+     *
+     * Taken rather than read: a reconnect an hour later must not report the same restore again,
+     * and Pano's task is finished by the first report either way.
+     */
+    private fun sendPendingRestoreReport() {
+        val outcome = RestorePending.take() ?: return
+
+        try {
+            sendMessage(BackupRestoredRequest(outcome.backupId, outcome.taskId, outcome.ok, outcome.error))
+        } catch (exception: Throwable) {
+            logger.warning("Failed to report a restored backup to Pano: ${exception.javaClass.simpleName}: ${exception.message}")
         }
     }
 

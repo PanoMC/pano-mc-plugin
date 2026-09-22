@@ -2,15 +2,23 @@ package com.panomc.plugins.pano.spigot
 
 import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.command.Command
+import com.panomc.plugins.pano.core.console.ConsoleLine
+import com.panomc.plugins.pano.core.console.Log4j2ConsoleCapture
 import com.panomc.plugins.pano.core.event.Listener
+import com.panomc.plugins.pano.core.files.RestorePending
 import com.panomc.plugins.pano.core.helper.Integration
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.integration.BanIntegration
 import com.panomc.plugins.pano.core.integration.PermissionIntegration
+import com.panomc.plugins.pano.core.platform.Capability
+import com.panomc.plugins.pano.core.platform.entity.InstalledPlugin
+import com.panomc.plugins.pano.core.platform.entity.PlayerData
 import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsMessage
+import com.panomc.plugins.pano.core.update.PanoSelfUpdate
 import com.panomc.plugins.pano.spigot.integration.AuthMeIntegration
 import io.vertx.core.http.WebSocket
+import java.io.File
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -100,6 +108,10 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     private val serverData by lazy { SpigotServerData(this) }
     private val mPanoLogger by lazy { getPanoLogger() }
+
+    // Owns the fallback tick sampler, so it has to be started with the plugin and stopped with it;
+    // on Paper/Purpur/Folia it starts nothing at all and just reads the server's own API.
+    private val spigotMetrics by lazy { SpigotMetrics(this) }
     internal val eventHelper by lazy { SpigotEventHelper(this) }
     // Nullable var, not lateinit: onDisable() clears this to null so a following onEnable() ->
     // registerEventListeners() builds and registers a fresh SpigotEventListener instead of
@@ -138,6 +150,23 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     // Mirrors VelocityMain.integrations.
     @Volatile
     private var integrations: List<Integration> = emptyList()
+
+    /**
+     * Applies a restore Pano armed for this start, before Bukkit has read a single world.
+     *
+     * `onLoad` is the whole reason a plugin can restore a backup at all: it runs after the server
+     * jar has been read but before the worlds are loaded, so replacing `world/` here is replacing
+     * files nothing has opened yet (AGENT.md 2.4.17 C). By `onEnable` it would already be far too
+     * late. Nothing here can throw: a corrupt backup must cost the restore, never the boot.
+     */
+    override fun onLoad() {
+        RestorePending.apply(getServerDirectory(), mPanoLogger)
+
+        // A self-update normally goes through plugins/update/ and never leaves a swap behind; one
+        // that fell back to swapping (no update folder could be resolved) and was interrupted
+        // before the server stopped cleanly is finished here instead (AGENT.md B3).
+        PanoSelfUpdate.applyPendingSwap(dataFolder, mPanoLogger)
+    }
 
     override fun onEnable() {
         // Cleared before anything else so a getPano() call racing this onEnable() (e.g. a lingering
@@ -187,6 +216,8 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     }
 
     private fun onStart() {
+        spigotMetrics.start()
+
         // Each integration gets its own try/catch, mirroring the onDisable() loop below: without
         // this, AuthMeIntegration.onEnable() reaching platformManager -> getPano() -> Pano.init()
         // and Pano.init() propagating a config-migration failure would escape onStart() entirely,
@@ -211,6 +242,10 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
     }
 
     override fun onDisable() {
+        // Before the integrations: cancelling a repeating task is only legal while the plugin is
+        // still enabled, and this one is scheduled against the Bukkit scheduler.
+        spigotMetrics.stop()
+
         // Integrations first: they may need to schedule Bukkit tasks while the plugin is still
         // enabled. Calling mPano.disable() first closes Vert.x asynchronously; the WebSocket
         // onDisconnect can fire after the plugin is already disabled, which would break
@@ -271,6 +306,42 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         if (::coroutineScope.isInitialized) {
             coroutineScope.cancel()
         }
+
+        // Last, after Vert.x is closed and nothing of Pano's is still reading its own jar: a
+        // staged self-update that could not use plugins/update/ swaps in now (AGENT.md B3). A
+        // no-op on the ordinary Bukkit route, which leaves no swap behind.
+        PanoSelfUpdate.applyPendingSwap(dataFolder, mPanoLogger)
+    }
+
+    /**
+     * The jar in `plugins/` this plugin was loaded from, for a self-update to replace.
+     *
+     * `JavaPlugin.getFile()` names the file the server loaded, but Paper may load a remapped copy
+     * from `plugins/.paper-remapped/` instead, and it is the original in `plugins/` that the next
+     * boot reads - so the answer is traced back to the plugins directory, which is this plugin's
+     * data folder's parent however the server was started.
+     */
+    override fun getOwnJarFile(): File? {
+        val loaded = try {
+            val method = JavaPlugin::class.java.getDeclaredMethod("getFile")
+
+            method.isAccessible = true
+
+            method.invoke(this) as? File
+        } catch (_: Throwable) {
+            null
+        } ?: PanoSelfUpdate.jarOf(javaClass)
+
+        val pluginsDirectory = dataFolder.absoluteFile.parentFile ?: return null
+
+        return PanoSelfUpdate.installedJarFor(loaded, pluginsDirectory)
+    }
+
+    /** `plugins/update/` (or whatever `bukkit.yml` renames it to), applied by the server at boot. */
+    override fun getUpdateFolder(): File? = try {
+        server.updateFolderFile
+    } catch (_: Throwable) {
+        null
     }
 
     override fun registerCommands(commands: List<Command>) {
@@ -447,6 +518,20 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
             existingListener.listeners.removeAll(listeners)
         }
     }
+
+    /**
+     * The server root, i.e. where `server.properties`, `plugins/`, `logs/` and the worlds live.
+     *
+     * Derived from the world container rather than from the working directory: a server started
+     * by a panel or a wrapper script often runs from somewhere else entirely, and Bukkit's own
+     * idea of where the server lives is the only one that is always right. `getDataFolder()`
+     * (`plugins/Pano`) is the fallback for a fork whose world container is unset.
+     */
+    override fun getServerDirectory(): File = try {
+        server.worldContainer.absoluteFile
+    } catch (exception: Throwable) {
+        null
+    } ?: dataFolder.absoluteFile.parentFile?.parentFile ?: File(".")
 
     override fun getPanoLogger(): Logger = ColoredLogger("[Pano] ")
 
@@ -641,11 +726,230 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         }
     }
 
+    override fun getCapabilities(): Set<Capability> = setOf(
+        Capability.CONSOLE,
+        Capability.COMMANDS,
+        Capability.METRICS,
+        Capability.PLAYERS,
+        Capability.POWER,
+        Capability.PLUGINS,
+        Capability.FILES,
+        Capability.BACKUPS,
+        Capability.PLUGIN_INSTALL,
+        Capability.SCHEDULES
+    )
+
+    override fun getInstalledPlugins(): List<InstalledPlugin> = try {
+        Bukkit.getPluginManager().plugins.map { plugin ->
+            val description = plugin.description
+
+            InstalledPlugin(
+                name = description.name,
+                version = description.version,
+                authors = description.authors ?: emptyList(),
+                description = description.description,
+                enabled = plugin.isEnabled,
+                file = pluginFileName(plugin)
+            )
+        }
+    } catch (exception: Throwable) {
+        mPanoLogger.fine("Could not read the installed plugin list: ${exception.javaClass.simpleName}: ${exception.message}")
+
+        emptyList()
+    }
+
+    override fun setPluginEnabled(name: String, enabled: Boolean): Boolean {
+        val pluginManager = Bukkit.getPluginManager()
+        val target = pluginManager.getPlugin(name) ?: return false
+
+        // Disabling Pano from Pano's own panel would tear down the connection carrying the
+        // request, leaving no way to turn it back on short of a server restart.
+        if (target === this && !enabled) {
+            mPanoLogger.warning("Refusing a request from Pano to disable the Pano plugin itself.")
+
+            return false
+        }
+
+        if (target.isEnabled == enabled) {
+            return true
+        }
+
+        runOnServerThread(if (enabled) "enable ${target.name}" else "disable ${target.name}") {
+            if (enabled) {
+                pluginManager.enablePlugin(target)
+            } else {
+                pluginManager.disablePlugin(target)
+            }
+        }
+
+        return true
+    }
+
+    // JavaPlugin.getFile() is protected, and the jar's file name is the only reliable way to line
+    // an installed plugin up with the resource Pano would have shipped it from.
+    private fun pluginFileName(plugin: Plugin): String? {
+        if (plugin !is JavaPlugin) {
+            return null
+        }
+
+        return try {
+            val method = JavaPlugin::class.java.getDeclaredMethod("getFile")
+
+            method.isAccessible = true
+
+            (method.invoke(plugin) as? java.io.File)?.name
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    override fun shutdown() {
+        runOnServerThread("stop") { Bukkit.shutdown() }
+    }
+
+    override fun restart() {
+        // Bukkit.spigot() only exists on Spigot and its descendants, and restart() only does
+        // anything when spigot.yml's restart-script is configured - reflection rather than a
+        // compiled call so a plain CraftBukkit server degrades to a stop instead of a
+        // NoSuchMethodError.
+        val spigot = try {
+            Bukkit::class.java.getMethod("spigot").invoke(null)
+        } catch (_: Throwable) {
+            null
+        }
+
+        val restart = spigot?.let {
+            try {
+                it.javaClass.getMethod("restart")
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
+        if (restart == null) {
+            mPanoLogger.warning("This server has no restart API; stopping instead. It only comes back if the host runs it under a restart loop.")
+
+            shutdown()
+
+            return
+        }
+
+        runOnServerThread("restart") { restart.invoke(spigot) }
+    }
+
+    private fun runOnServerThread(action: String, block: () -> Unit) {
+        try {
+            SpigotServerUtil.runGlobalTask(this) {
+                try {
+                    block()
+                } catch (exception: Throwable) {
+                    mPanoLogger.severe("Failed to $action the server: ${exception.javaClass.simpleName}: ${exception.message}")
+                }
+            }
+        } catch (exception: Throwable) {
+            mPanoLogger.severe("Could not schedule the server $action: ${exception.javaClass.simpleName}: ${exception.message}")
+        }
+    }
+
+    /**
+     * Pauses or resumes world autosaving, flushing on the way out, for a backup.
+     *
+     * Through the world API rather than `save-off`/`save-all`: every Bukkit fork has it, it does
+     * not depend on the console command set a particular server happens to ship, and it says
+     * plainly whether there were any worlds to pause at all. Queued onto the server thread like
+     * every other world touch; the backup gives it a moment rather than waiting on it, because
+     * there is nothing to wait on.
+     */
+    override fun setWorldSaving(enabled: Boolean): Boolean {
+        val worlds = try {
+            Bukkit.getWorlds()
+        } catch (exception: Throwable) {
+            mPanoLogger.warning("Could not read this server's worlds: ${exception.javaClass.simpleName}: ${exception.message}")
+
+            return false
+        }
+
+        if (worlds.isEmpty()) {
+            return false
+        }
+
+        runOnServerThread(if (enabled) "resume world saving on" else "pause world saving on") {
+            Bukkit.getWorlds().forEach { world ->
+                world.isAutoSave = enabled
+
+                // Flushed as it is paused, not as it is resumed: the point of pausing is to have
+                // a consistent copy on disk to read, and the save is what puts it there.
+                if (!enabled) {
+                    world.save()
+                }
+            }
+        }
+
+        return true
+    }
+
+    override fun getTps(): DoubleArray? = spigotMetrics.getTps()
+
+    override fun getMspt(): Double? = spigotMetrics.getMspt()
+
+    override fun getOnlinePlayers(): List<PlayerData> = try {
+        Bukkit.getOnlinePlayers().map {
+            PlayerData(
+                it.uniqueId.toString(),
+                it.name,
+                SpigotServerUtil.getPlayerPing(it),
+                op = it.isOp,
+                whitelisted = it.isWhitelisted,
+                gamemode = it.gameMode.name.lowercase()
+            )
+        }
+    } catch (exception: Throwable) {
+        mPanoLogger.fine("Could not read the online roster: ${exception.javaClass.simpleName}: ${exception.message}")
+
+        emptyList()
+    }
+
+    // Bukkit's own console goes through log4j-core (CraftBukkit routes the JUL Bukkit.getLogger()
+    // into it), which is not on a plugin's compile classpath on any of Spigot/Paper/Folia - hence
+    // the reflective appender rather than a compiled one.
+    override fun installConsoleCapture(sink: (ConsoleLine) -> Unit): AutoCloseable? =
+        Log4j2ConsoleCapture.install(sink)
+
+    override fun dispatchConsoleCommand(command: String) {
+        // runGlobalTask already picks Folia's global region scheduler when it is present and falls
+        // back to the Bukkit scheduler everywhere else; either way the command runs on a thread
+        // that is allowed to touch the world, never on the Vert.x event loop.
+        try {
+            SpigotServerUtil.runGlobalTask(this) {
+                try {
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command)
+                } catch (exception: Throwable) {
+                    mPanoLogger.warning("Console command from Pano failed: ${exception.javaClass.simpleName}: ${exception.message}")
+                }
+            }
+        } catch (exception: Throwable) {
+            // Scheduling throws IllegalPluginAccessException once the plugin is disabled.
+            mPanoLogger.warning("Could not schedule console command from Pano: ${exception.javaClass.simpleName}: ${exception.message}")
+        }
+    }
+
     override fun kickPlayer(player: String, message: String) {
         // PanoPluginMain.kickPlayer's contract is raw '&' in, rendered out — player.kickPlayer()
         // (via SpigotServerUtil.kickPlayer) does no conversion of its own, unlike the other
         // platforms' kick calls.
         SpigotServerUtil.kickPlayer(this, server.getPlayer(player) ?: return, translateColor(message))
+    }
+
+    override fun sendPlayerMessage(uuid: String, username: String, message: String): Boolean {
+        val target = runCatching { server.getPlayer(UUID.fromString(uuid)) }.getOrNull()
+            ?: server.getPlayerExact(username)
+            ?: return false
+
+        SpigotServerUtil.runPlayerTask(this, target) {
+            target.sendMessage(translateColor(message))
+        }
+
+        return true
     }
 
     /**
