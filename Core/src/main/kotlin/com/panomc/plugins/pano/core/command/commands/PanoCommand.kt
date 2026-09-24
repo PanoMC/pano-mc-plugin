@@ -1,9 +1,11 @@
 package com.panomc.plugins.pano.core.command.commands
 
+import com.panomc.plugins.pano.core.Pano
 import com.panomc.plugins.pano.core.annotation.Command
 import com.panomc.plugins.pano.core.helper.CommandHelper
 import com.panomc.plugins.pano.core.model.PanoError
 import com.panomc.plugins.pano.core.platform.PlatformManager
+import com.panomc.plugins.pano.core.platform.Protocol
 import java.io.Console
 import java.util.logging.Level
 import java.util.logging.Logger
@@ -34,6 +36,10 @@ class PanoCommand(
 
         if (args[0].equals("disconnect", true)) {
             return disconnectCommand(commandSender, commandHelper)
+        }
+
+        if (args[0].equals("status", true)) {
+            return statusCommand(commandSender, commandHelper)
         }
 
         showHelp(commandSender, commandHelper)
@@ -135,6 +141,22 @@ class PanoCommand(
         return true
     }
 
+    /**
+     * `/pano status`: whether this server is linked, to what, how fast the link answers and what
+     * Pano turned on for it. The latency is a ping sent now (a few seconds at most, on the command
+     * coroutine, never the server thread), falling back to the last heartbeat's round trip.
+     */
+    private suspend fun statusCommand(commandSender: Any, commandHelper: CommandHelper): Boolean {
+        val status = platformManager.connectionStatus()
+        val latency = if (status.connected) platformManager.measureLatency() else null
+
+        statusLines(status, latency, System.currentTimeMillis()).forEach {
+            commandHelper.sendMessage(commandSender, it)
+        }
+
+        return true
+    }
+
     private fun showConnectArgumentUsage(
         commandSender: Any,
         commandHelper: CommandHelper
@@ -152,5 +174,99 @@ class PanoCommand(
             commandSender,
             "&e/pano disconnect - Disconnect from Pano platform."
         )
+        commandHelper.sendMessage(
+            commandSender,
+            "&e/pano status - Show the connection to Pano platform."
+        )
+    }
+
+    companion object {
+        /**
+         * The lines `/pano status` prints, `&`-coded. Pure, so what an admin reads in every state
+         * can be asserted without a socket.
+         *
+         * @param latencyMillis a round trip measured just now, or null when there was none (not
+         *   connected, or no answer in time) -- the last heartbeat's is shown then.
+         * @param now the current time, for "connected for" and "last heartbeat ... ago".
+         */
+        fun statusLines(
+            status: PlatformManager.ConnectionStatus,
+            latencyMillis: Long?,
+            now: Long,
+            pluginVersion: String = Pano.VERSION
+        ): List<String> {
+            val lines = mutableListOf("&6Pano status")
+
+            if (!status.configured) {
+                lines += "&7Connection: &cNot connected to a Pano platform."
+                lines += "&7Connect with: &e/pano connect <platform-address> <platform-code>"
+                lines += "&7Plugin: &f$pluginVersion &7(protocol ${Protocol.VERSION})"
+
+                return lines
+            }
+
+            val scheme = if (status.ssl) "https" else "http"
+            val address = listOfNotNull(status.host, status.port?.toString()).joinToString(":")
+
+            lines += "&7Platform: &f${address.ifEmpty { "-" }} &7($scheme)"
+
+            lines += when {
+                status.connected && status.connectedAt != null ->
+                    "&7Connection: &aConnected &7for ${formatDuration(now - status.connectedAt)}"
+
+                status.connected -> "&7Connection: &aConnected"
+                status.connecting -> "&7Connection: &eConnecting... &7(retrying until Pano answers)"
+                else -> "&7Connection: &cDisconnected"
+            }
+
+            if (status.connected) {
+                val measured = latencyMillis ?: status.lastRoundTripMillis
+
+                lines += when {
+                    latencyMillis != null -> "&7Latency: &f$latencyMillis ms"
+                    measured != null -> "&7Latency: &f$measured ms &7(last heartbeat; no answer to a new ping)"
+                    else -> "&7Latency: &cno answer to a ping"
+                }
+
+                status.lastPongAt?.let { lastPong ->
+                    val cadence = if (status.heartbeatIntervalMillis != null && status.heartbeatTimeoutMillis != null) {
+                        " &7(every ${formatDuration(status.heartbeatIntervalMillis)}, timeout ${formatDuration(status.heartbeatTimeoutMillis)})"
+                    } else {
+                        ""
+                    }
+
+                    lines += "&7Last heartbeat: &f${formatDuration(now - lastPong)} ago$cadence"
+                }
+            }
+
+            status.settings?.let { settings ->
+                lines += "&7Integrations: &f" + listOf(
+                    "auth" to settings.authIntegration,
+                    "bans" to settings.banIntegration,
+                    "permissions" to settings.permissionIntegration
+                ).joinToString(", ") { (name, on) -> "$name ${if (on) "&aon&f" else "&7off&f"}" }
+            }
+
+            lines += "&7Plugin: &f$pluginVersion &7(protocol ${Protocol.VERSION})"
+
+            return lines
+        }
+
+        /** `2h 13m`, `45s`, `1d 3h`: the two largest units, never "0s" for a positive span. */
+        fun formatDuration(millis: Long): String {
+            val totalSeconds = (millis.coerceAtLeast(0) + 999) / 1000
+
+            val days = totalSeconds / 86_400
+            val hours = totalSeconds % 86_400 / 3_600
+            val minutes = totalSeconds % 3_600 / 60
+            val seconds = totalSeconds % 60
+
+            return when {
+                days > 0 -> if (hours > 0) "${days}d ${hours}h" else "${days}d"
+                hours > 0 -> if (minutes > 0) "${hours}h ${minutes}m" else "${hours}h"
+                minutes > 0 -> if (seconds > 0) "${minutes}m ${seconds}s" else "${minutes}m"
+                else -> "${seconds}s"
+            }
+        }
     }
 }

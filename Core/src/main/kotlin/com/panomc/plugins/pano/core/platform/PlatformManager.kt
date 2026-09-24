@@ -75,6 +75,7 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
 import javax.crypto.SecretKey
 
@@ -170,6 +171,29 @@ class PlatformManager(
     // correctness needs here - no shared context required.
     @Volatile
     private var lastPongReceivedAt: Long = 0
+
+    // What `/pano status` reports about the current connection, all written on the event loop by
+    // startHeartbeat / its pong handler / onWebSocketClosed and read from the command coroutine:
+    // when the handshake finished (0 while there is no connection), the heartbeat settings it runs
+    // with, when the last heartbeat ping went out (System.nanoTime, 0 before the first) and the
+    // round trip the last one took.
+    @Volatile
+    private var connectedAt: Long = 0
+
+    @Volatile
+    private var activeHeartbeatSettings: HeartbeatSettings? = null
+
+    @Volatile
+    private var lastPingSentAtNanos: Long = 0
+
+    @Volatile
+    private var lastRoundTripMillis: Long? = null
+
+    // The one on-demand latency probe in flight (measureLatency), if any. Its ping carries a payload
+    // of its own, which the pong echoes back, so its answer is never mistaken for a heartbeat's.
+    private val latencyProbe = AtomicReference<LatencyProbe?>(null)
+
+    private class LatencyProbe(val payload: String, val sentAtNanos: Long, val result: CompletableDeferred<Long>)
 
     // ConcurrentHashMap because entries are written from whatever thread calls
     // sendMessageAwaitResponse (game/auth threads, Dispatchers.IO) and read/removed from the
@@ -510,6 +534,80 @@ class PlatformManager(
     }
 
     fun getWebSocket() = webSocket
+
+    /** Everything `/pano status` shows about the link to Pano, read without touching the network. */
+    data class ConnectionStatus(
+        /** A platform is saved in config.conf (host and token). */
+        val configured: Boolean,
+        val connected: Boolean,
+        /** Not connected, but a connect attempt or the retry loop is running. */
+        val connecting: Boolean,
+        val host: String?,
+        val port: Int?,
+        val ssl: Boolean,
+        /** When the current connection finished its handshake; null while not connected. */
+        val connectedAt: Long?,
+        /** When the last heartbeat pong arrived; null while not connected. */
+        val lastPongAt: Long?,
+        /** The round trip of the last heartbeat ping, null before the first came back. */
+        val lastRoundTripMillis: Long?,
+        val heartbeatIntervalMillis: Long?,
+        val heartbeatTimeoutMillis: Long?,
+        /** What Pano said about this server on connect; null before the first handshake. */
+        val settings: GetServerSettingsMessage?
+    )
+
+    fun connectionStatus(): ConnectionStatus {
+        val platform = configManager.config.platform
+        val connected = webSocket != null && connectedAt != 0L
+        val heartbeat = activeHeartbeatSettings.takeIf { connected }
+
+        return ConnectionStatus(
+            configured = isPlatformConfigured(),
+            connected = connected,
+            connecting = !connected && connecting.get(),
+            host = platform?.host?.takeIf { it.isNotBlank() },
+            port = platform?.port,
+            ssl = platform?.ssl == true,
+            connectedAt = connectedAt.takeIf { connected },
+            lastPongAt = lastPongReceivedAt.takeIf { connected },
+            lastRoundTripMillis = lastRoundTripMillis.takeIf { connected },
+            heartbeatIntervalMillis = heartbeat?.intervalMillis,
+            heartbeatTimeoutMillis = heartbeat?.timeoutMillis,
+            settings = if (::serverSettings.isInitialized) serverSettings else null
+        )
+    }
+
+    /**
+     * Pings Pano now and returns the round trip in milliseconds, or null when there is no
+     * connection or no answer came within [timeoutMillis].
+     *
+     * A WebSocket ping, not a request: it measures the link itself, with nothing on Pano's side
+     * doing any work in between, and it needs no protocol support there -- every WebSocket peer
+     * answers a ping. Two probes at once share the first one's answer.
+     */
+    suspend fun measureLatency(timeoutMillis: Long = LATENCY_PROBE_TIMEOUT_MILLIS): Long? {
+        val socket = webSocket ?: return null
+
+        val fresh = LatencyProbe("pano-status-${UUID.randomUUID()}", System.nanoTime(), CompletableDeferred())
+        val probe = if (latencyProbe.compareAndSet(null, fresh)) fresh else latencyProbe.get() ?: return null
+
+        if (probe === fresh) {
+            socket.writePing(Buffer.buffer(fresh.payload)).onFailure {
+                if (latencyProbe.compareAndSet(fresh, null)) {
+                    fresh.result.cancel()
+                }
+            }
+        }
+
+        return try {
+            withTimeout(timeoutMillis) { probe.result.await() }
+        } catch (_: Exception) {
+            latencyProbe.compareAndSet(probe, null)
+
+            null
+        }
+    }
 
     private suspend fun queryServerStatus(): McStatus {
         return try {
@@ -1007,6 +1105,10 @@ class PlatformManager(
 
         webSocket = null
 
+        connectedAt = 0
+        lastRoundTripMillis = null
+        latencyProbe.getAndSet(null)?.result?.cancel()
+
         // Fail everything still parked in sendMessageAwaitResponse instead of leaving those
         // callers awaiting forever (platform-core-2).
         failAllPendingResponses(PanoError("&cLost connection to Pano Platform."))
@@ -1108,12 +1210,30 @@ class PlatformManager(
         // had a chance to round-trip (platform-core-heartbeat).
         lastPongReceivedAt = System.currentTimeMillis()
 
-        socket.pongHandler {
+        connectedAt = lastPongReceivedAt
+        activeHeartbeatSettings = settings
+        lastPingSentAtNanos = 0
+        lastRoundTripMillis = null
+
+        socket.pongHandler { data ->
             // Same socket-identity guard the closeHandler in establishConnectionToPlatform uses -
             // a pong for a socket that has since been replaced by a newer connection must not
             // refresh the new connection's liveness clock (platform-core-heartbeat).
             if (this.webSocket === socket) {
                 lastPongReceivedAt = System.currentTimeMillis()
+
+                // The round trip, for /pano status: a probe's pong completes its probe, a
+                // heartbeat's (empty payload) times the ping the timer below sent last.
+                val probe = latencyProbe.get()
+                val payload = data?.toString().orEmpty()
+
+                if (probe != null && payload == probe.payload) {
+                    if (latencyProbe.compareAndSet(probe, null)) {
+                        probe.result.complete((System.nanoTime() - probe.sentAtNanos) / NANOS_PER_MILLI)
+                    }
+                } else if (payload.isEmpty() && lastPingSentAtNanos != 0L) {
+                    lastRoundTripMillis = (System.nanoTime() - lastPingSentAtNanos) / NANOS_PER_MILLI
+                }
 
                 // Every fresh pong pushes the death deadline back out - this is what lets a
                 // healthy connection run indefinitely without ever tripping the watchdog
@@ -1144,6 +1264,8 @@ class PlatformManager(
             // is therefore dead code on every path, including the oversized-payload contract -
             // moot anyway since Buffer.buffer() here is always empty. Mirror the backend's
             // ServerManager and attach onFailure instead (platform-core-heartbeat).
+            lastPingSentAtNanos = System.nanoTime()
+
             socket.writePing(Buffer.buffer()).onFailure { cause ->
                 // The Future can complete after this socket has already been superseded (closed,
                 // replaced by a newer connection) - re-check identity the same way the
@@ -1461,6 +1583,11 @@ class PlatformManager(
     }
 
     companion object {
+        /** How long `/pano status` waits for its ping to come back. */
+        const val LATENCY_PROBE_TIMEOUT_MILLIS = 3_000L
+
+        private const val NANOS_PER_MILLI = 1_000_000L
+
         // Caps the synchronous startup connect phase so a slow/unreachable platform can never
         // block the server's boot thread forever (platform-core-1); once spent, connectPlatformTask
         // hands off to the async background retry loop.
