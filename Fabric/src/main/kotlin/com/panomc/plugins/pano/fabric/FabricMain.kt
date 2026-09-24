@@ -737,17 +737,19 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
             val playerList = server.getPlayerList()
 
             playerList.getPlayers().map {
-                val nameAndId = it.nameAndId()
+                // Each field on its own: a Minecraft that renamed one of these calls costs the panel
+                // that one column ("unknown"), not the whole roster.
+                val nameAndId = tolerant { it.nameAndId() }
 
                 PlayerData(
                     it.getUUID().toString(),
-                    it.getGameProfile().name,
-                    it.connection.latency().toLong(),
-                    op = playerList.isOp(nameAndId),
+                    tolerant { it.getGameProfile().name } ?: it.getName().string,
+                    tolerant { it.connection.latency().toLong() } ?: 0L,
+                    op = nameAndId?.let { id -> tolerant { playerList.isOp(id) } },
                     // The list itself: PlayerList.isWhiteListed() answers "may join", which is true for
                     // everyone while the whitelist is off and for every op.
-                    whitelisted = playerList.getWhiteList().isWhiteListed(nameAndId),
-                    gamemode = it.gameMode().getName()
+                    whitelisted = nameAndId?.let { id -> tolerant { playerList.getWhiteList().isWhiteListed(id) } },
+                    gamemode = tolerant { it.gameMode().getName() }
                 )
             }
         } catch (exception: Throwable) {
@@ -823,9 +825,25 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
                 server?.getPlayerList()?.getPlayerByName(player)?.connection?.disconnect(
                     FabricTextHelper.parseColoredText(message)
                 )
-            } catch (_: Exception) {
-                // Silently handle if method signatures changed between MC versions
+            } catch (exception: Exception) {
+                logger.warning("Could not kick $player: ${exception.javaClass.simpleName}: ${exception.message}")
+            } catch (error: LinkageError) {
+                // A Minecraft whose API moved: on the server thread an Error would crash the server,
+                // which is a far worse outcome than a kick that did not happen.
+                logger.warning("Could not kick $player on this Minecraft version: ${error.javaClass.simpleName}: ${error.message}")
             }
         }
+    }
+
+    /**
+     * [block], or null when this Minecraft does not have what it calls (a `LinkageError`) or it
+     * threw: for the handful of per-field reads that differ between releases.
+     */
+    private inline fun <T> tolerant(block: () -> T): T? = try {
+        block()
+    } catch (_: LinkageError) {
+        null
+    } catch (_: RuntimeException) {
+        null
     }
 }

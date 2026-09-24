@@ -42,7 +42,27 @@ class FabricCommand(
         // This version's CommandSourceStack has no int-level hasPermission(); permission
         // levels are PermissionCheck.check(PermissionSet) instead (platform-modules-1).
         private fun hasCommandPermission(command: Command, source: CommandSourceStack): Boolean =
-            command.permission == null || Commands.LEVEL_ADMINS.check(source.permissions())
+            command.permission == null || isAdmin(source)
+
+        /**
+         * Operator level 4 (what `pano.admin` means on a server without a permissions mod).
+         *
+         * Minecraft 26 names are not obfuscated, so a release that moves the permission API again
+         * can still be asked the old way by name: the compiled call first, then the int-level
+         * `hasPermission(4)` it replaced, and "no" -- never a crash -- when neither exists.
+         */
+        private fun isAdmin(source: CommandSourceStack): Boolean = try {
+            Commands.LEVEL_ADMINS.check(source.permissions())
+        } catch (_: LinkageError) {
+            try {
+                source.javaClass.getMethod("hasPermission", Int::class.javaPrimitiveType)
+                    .invoke(source, ADMIN_LEVEL) as Boolean
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        private const val ADMIN_LEVEL = 4
 
         // register() is only ever called with a FabricMain (see FabricMain's two call sites), but
         // takes the interface type; fall back to a throwaway scope in the (unreachable in practice)
