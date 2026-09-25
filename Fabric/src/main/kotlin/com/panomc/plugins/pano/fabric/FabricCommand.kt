@@ -18,9 +18,7 @@ class FabricCommand(
 ) : CommandHelper {
 
     override fun sendMessage(commandSender: Any, message: String) {
-        (commandSender as? CommandSourceStack)?.sendSystemMessage(
-            FabricTextHelper.parseColoredText(message)
-        )
+        (commandSender as? CommandSourceStack)?.let { FabricReply.send(it, message) }
     }
 
     override fun isPlayer(commandSender: Any): Boolean {

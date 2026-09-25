@@ -15,10 +15,9 @@ class FabricEventListener(
 ) : EventHelper {
 
     override fun sendMessage(commandSender: Any, message: String) {
-        val text = FabricTextHelper.parseColoredText(message)
         when (commandSender) {
-            is ServerPlayer -> commandSender.sendSystemMessage(text)
-            is CommandSourceStack -> commandSender.sendSystemMessage(text)
+            is ServerPlayer -> commandSender.sendSystemMessage(FabricTextHelper.parseColoredText(message))
+            is CommandSourceStack -> FabricReply.send(commandSender, message)
         }
     }
 
