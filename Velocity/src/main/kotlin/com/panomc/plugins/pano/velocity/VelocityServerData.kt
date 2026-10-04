@@ -21,7 +21,7 @@ class VelocityServerData(private val server: ProxyServer) : ServerData {
 
     override fun serverType(): ServerType = ServerType.VELOCITY
 
-    override fun serverVersion(): String = "${server.version.name},${server.version.vendor},${server.version.version}"
+    override fun serverVersion(): String = server.version.version
 
     override fun playerCount(): Int = server.playerCount
 

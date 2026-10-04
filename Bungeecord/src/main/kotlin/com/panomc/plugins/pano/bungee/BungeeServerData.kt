@@ -19,7 +19,16 @@ class BungeeServerData(private val plugin: Plugin) : ServerData {
 
     override fun serverType(): ServerType = ServerType.BUNGEECORD
 
-    override fun serverVersion(): String = plugin.proxy.version
+    /**
+     * BungeeCord and Waterfall report `git:<name>:<version>:<commit>:<build>`; the version and the
+     * build are the two parts a person reads.
+     */
+    override fun serverVersion(): String {
+        val raw = plugin.proxy.version
+        val parts = raw.split(':')
+
+        return if (parts.size == 5 && parts[0] == "git") "${parts[2]} (build ${parts[4]})" else raw
+    }
 
     override fun playerCount(): Int = plugin.proxy.players.size
 

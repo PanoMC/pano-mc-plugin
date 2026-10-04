@@ -818,9 +818,16 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
             null
         }
 
+        // Looked up on the public org.bukkit.Server.Spigot type, never on the object's own class:
+        // what Bukkit.spigot() hands back is an anonymous CraftServer subclass, and a Method
+        // taken from a non-public class cannot be invoked from here even though it is public
+        // itself (IllegalAccessException on Paper 26.3). By name, because a plain CraftBukkit
+        // has no such type at all.
         val restart = spigot?.let {
             try {
-                it.javaClass.getMethod("restart")
+                Class.forName("org.bukkit.Server\$Spigot", false, Bukkit::class.java.classLoader)
+                    .takeIf { type -> type.isInstance(it) }
+                    ?.getMethod("restart")
             } catch (_: Throwable) {
                 null
             }
