@@ -36,6 +36,10 @@
             "label": false
           },
           {
+            "path": "Core/build/libs/*.jar",
+            "label": false
+          },
+          {
             "path": "Bungeecord/build/libs/*.zip",
             "label": false
           },
