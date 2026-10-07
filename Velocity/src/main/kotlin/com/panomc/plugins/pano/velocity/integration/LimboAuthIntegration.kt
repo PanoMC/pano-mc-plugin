@@ -174,7 +174,8 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
     private fun takeOverJoinListener() {
         val listeners = panoPluginMain.velocityEventListener.listeners
 
-        listeners.removeAll { it is OnPlayerJoin }
+        // the set is copy-on-write: its iterator cannot remove, so the predicate form of removeAll throws
+        listeners.removeAll(listeners.filterIsInstance<OnPlayerJoin>().toSet())
         listeners.add(joinListener)
 
         logger.info("&2Registered events for LimboAuth.".colorize())
@@ -183,7 +184,8 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
     private fun restoreJoinListener() {
         val listeners = panoPluginMain.velocityEventListener.listeners
 
-        listeners.removeAll { it is OnPlayerJoin }
+        // the set is copy-on-write: its iterator cannot remove, so the predicate form of removeAll throws
+        listeners.removeAll(listeners.filterIsInstance<OnPlayerJoin>().toSet())
         listeners.addAll(pano.eventManager.eventListeners.filterIsInstance<OnPlayerJoin>())
     }
 
