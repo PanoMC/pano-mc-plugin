@@ -22,7 +22,7 @@ import java.util.logging.Logger
  * Handles `PANO_PLUGIN_UPDATE`: fetches the newer build Pano offers, checks it and stages it
  * (AGENT.md B3).
  *
- * The download comes from Pano itself (`/api/server/pano-plugin/jar`), resolved against the address
+ * The download comes from Pano itself (`/api/v1/server/pano-plugin/jar`), resolved against the address
  * this server is connected to and sent with the platform token from `config.conf` — the same
  * credential and the same kind of request the transfers use. A URL on any other host is fetched
  * without the token: a bearer token does not travel to strangers, whatever the message says.

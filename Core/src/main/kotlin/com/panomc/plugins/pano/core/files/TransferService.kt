@@ -2,6 +2,7 @@ package com.panomc.plugins.pano.core.files
 
 import com.panomc.plugins.pano.core.config.ConfigManager
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
+import com.panomc.plugins.pano.core.platform.PanoPaths
 import com.panomc.plugins.pano.core.platform.message.response.TransferPullMessage
 import com.panomc.plugins.pano.core.platform.message.response.TransferPushMessage
 import io.vertx.core.json.JsonObject
@@ -49,7 +50,7 @@ sealed class VirtualSource {
  * either side, and the ticket is what ties that anonymous-looking request back to the person who
  * asked for it.
  *
- * The same endpoint and the same headers the node daemon uses (`/api/node/transfer/:ticket`,
+ * The same endpoint and the same headers the node daemon uses (`/api/v1/node/transfer/:ticket`,
  * AGENT.md 2.4.4) - it is one door, and which credential opened it is Pano's business, not this
  * side's. The direction names are from Pano's point of view: a PULL moves a file *out of* the
  * server to a waiting browser, a PUSH moves an uploaded file *into* it.
@@ -602,7 +603,7 @@ class TransferService(
             zip.finish()
         }
 
-        const val TRANSFER_PATH = "/api/node/transfer/"
+        const val TRANSFER_PATH = PanoPaths.NODE_TRANSFER
 
         /** Set on an empty PUT to fail the browser request waiting on this ticket. */
         const val ERROR_HEADER = "X-Pano-Transfer-Error"

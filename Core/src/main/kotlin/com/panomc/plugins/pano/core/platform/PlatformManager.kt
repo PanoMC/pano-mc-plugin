@@ -709,7 +709,7 @@ class PlatformManager(
             val scheme = if (s) "https" else "http"
             try {
                 val response = webClient
-                    .post(p, h, "/api/server/connect")
+                    .post(p, h, PanoPaths.SERVER_CONNECT)
                     .ssl(s)
                     .timeout(5000)
                     .sendJsonObject(requestBody)
@@ -721,7 +721,7 @@ class PlatformManager(
                     null
                 }
 
-                if (body != null && (body.containsKey("result") || body.containsKey("token"))) {
+                if (body != null && (PanoEnvelope.isError(body) || body.containsKey("token"))) {
                     finalResponse = response
                     finalHost = h
                     finalPort = p
@@ -756,10 +756,8 @@ class PlatformManager(
 
         val body = finalResponse.bodyAsJsonObject()
 
-        if (body != null && body.getString("result") == "error") {
-            val error = body.getString("error")
-
-            throw PanoError(getErrorMessageByErrorCode(error))
+        if (body != null && PanoEnvelope.isError(body)) {
+            throw PanoError(getErrorMessageByErrorCode(PanoEnvelope.errorCode(body) ?: UNKNOWN_ERROR))
         }
 
         val keySpec = PKCS8EncodedKeySpec(decoder.decode(configManager.config.privateKey))
@@ -798,7 +796,7 @@ class PlatformManager(
         val token = platformConfig.token
 
         val request = webClient
-            .post(port, host, "/api/server/disconnect")
+            .post(port, host, PanoPaths.SERVER_DISCONNECT)
             .ssl(platformConfig.ssl)
             .putHeader("Authorization", "Bearer $token")
             .send()
@@ -848,7 +846,7 @@ class PlatformManager(
         webSocketConnectOptions.host = host
         webSocketConnectOptions.port = port
         webSocketConnectOptions.isSsl = platformConfig.ssl
-        webSocketConnectOptions.uri = "/api/server/connection"
+        webSocketConnectOptions.uri = PanoPaths.SERVER_CONNECTION
         webSocketConnectOptions.method = HttpMethod.GET
 
         webSocketConnectOptions.putHeader("Authorization", "Bearer $token")
@@ -869,8 +867,8 @@ class PlatformManager(
                     null
                 }
 
-                if (body != null && body.getString("result") == "error") {
-                    val error = body.getString("error")
+                if (body != null && PanoEnvelope.isError(body)) {
+                    val error = PanoEnvelope.errorCode(body) ?: UNKNOWN_ERROR
 
                     logger.severe(pluginMain.translateColor(getErrorMessageByErrorCode(error)))
 
@@ -1583,6 +1581,9 @@ class PlatformManager(
     }
 
     companion object {
+        /** Stands in for the code of an error answer that carried none. */
+        private const val UNKNOWN_ERROR = "UNKNOWN"
+
         /** How long `/pano status` waits for its ping to come back. */
         const val LATENCY_PROBE_TIMEOUT_MILLIS = 3_000L
 

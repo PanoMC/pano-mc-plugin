@@ -302,7 +302,7 @@ class SelfUpdateTest {
 
         val (url, headers) = downloads.single()
 
-        assertEquals("http://pano.test:8080/api/server/pano-plugin/jar", url)
+        assertEquals("http://pano.test:8080/api/v1/server/pano-plugin/jar", url)
         assertEquals("Bearer server-token", headers["Authorization"])
 
         downloads.clear()
@@ -393,7 +393,7 @@ class SelfUpdateTest {
         version: String = "1.0.0-alpha.63",
         sha256: String? = null,
         size: Long? = null,
-        url: String = "/api/server/pano-plugin/jar"
+        url: String = "/api/v1/server/pano-plugin/jar"
     ): PanoPluginUpdateMessage {
         served = bytes
 

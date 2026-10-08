@@ -11,10 +11,12 @@ package com.panomc.plugins.pano.core.platform
  *   having no capabilities.
  * - `2` - first version that announces `protocolVersion`, `pluginVersion` and a capability list
  *   on connect.
+ * - `3` - speaks the `/api/v1` paths ([PanoPaths]) and reads Pano's error envelope
+ *   (`{ "error": { "code" } }`). There is no fallback to the old `/api/server/...` paths.
  *
  * Bump this whenever the wire format changes in a way the platform has to know about, and never
  * assume the peer speaks the same version: the platform tolerates older plugins on purpose.
  */
 object Protocol {
-    const val VERSION = 2
+    const val VERSION = 3
 }

@@ -269,7 +269,7 @@ class ProtocolNamesTest {
 
         assertEquals("ON_SERVER_CONNECT", encoded.getString("event"))
         assertEquals("Europe/Istanbul", encoded.getString("timeZone"))
-        assertEquals(2, encoded.getInteger("protocolVersion"), "additive: the protocol stays 2")
+        assertEquals(3, encoded.getInteger("protocolVersion"), "protocol 3 = the /api/v1 paths and the error envelope")
 
         // Nullable and always on the wire, like every other optional connect field.
         assertEquals(true, connect(null).containsKey("timeZone"))
@@ -324,13 +324,13 @@ class ProtocolNamesTest {
         // Pano's PanoPluginUpdateMessage, field for field, as its socket sends it.
         val message = com.panomc.plugins.pano.core.Pano.gson.fromJson(
             """{"event":"PANO_PLUGIN_UPDATE","eventId":"8a4f0c9e-7d2b-4c1a-9f3e-2b6d5e8a1c07","taskId":"t-1",""" +
-                """"url":"/api/server/pano-plugin/jar","sha256":"ab","size":42,""" +
+                """"url":"/api/v1/server/pano-plugin/jar","sha256":"ab","size":42,""" +
                 """"fileName":"pano-velocity-1.0.0.jar","version":"1.0.0"}""",
             PanoPluginUpdateMessage::class.java
         )
 
         assertEquals("t-1", message.taskId)
-        assertEquals("/api/server/pano-plugin/jar", message.url)
+        assertEquals("/api/v1/server/pano-plugin/jar", message.url)
         assertEquals(42L, message.size)
         assertEquals("pano-velocity-1.0.0.jar", message.fileName)
         assertEquals("1.0.0", message.version)
@@ -467,5 +467,38 @@ class ProtocolNamesTest {
         assertEquals(false, encoded.getBoolean("ok"))
 
         assertEquals(setOf("kind", "ok", "error"), encoded.getJsonArray("tasks").getJsonObject(0).fieldNames())
+    }
+
+    @Test
+    fun `protocol 3 speaks only the five api v1 paths`() {
+        assertEquals(3, Protocol.VERSION)
+
+        assertEquals("/api/v1/server/connect", PanoPaths.SERVER_CONNECT)
+        assertEquals("/api/v1/server/disconnect", PanoPaths.SERVER_DISCONNECT)
+        assertEquals("/api/v1/server/connection", PanoPaths.SERVER_CONNECTION)
+        assertEquals("/api/v1/node/transfer/", PanoPaths.NODE_TRANSFER)
+        assertEquals("/api/v1/server/pano-plugin/jar", PanoPaths.PLUGIN_JAR)
+        assertEquals(PanoPaths.NODE_TRANSFER, com.panomc.plugins.pano.core.files.TransferService.TRANSFER_PATH)
+    }
+
+    @Test
+    fun `an error answer is read from error code and nothing else`() {
+        val refused = JsonObject("""{"error":{"code":"INVALID_TOKEN","message":"no","details":{"x":1}}}""")
+
+        assertEquals(true, PanoEnvelope.isError(refused))
+        assertEquals("INVALID_TOKEN", PanoEnvelope.errorCode(refused))
+
+        // A code-less error object is still an error, just an unnamed one.
+        val unnamed = JsonObject("""{"error":{}}""")
+
+        assertEquals(true, PanoEnvelope.isError(unnamed))
+        assertEquals(null, PanoEnvelope.errorCode(unnamed))
+
+        // The old flat shape and a success body are not errors of the new envelope.
+        assertEquals(false, PanoEnvelope.isError(JsonObject("""{"result":"error","error":"INVALID_TOKEN"}""")))
+        assertEquals(null, PanoEnvelope.errorCode(JsonObject("""{"result":"error","error":"INVALID_TOKEN"}""")))
+        assertEquals(false, PanoEnvelope.isError(JsonObject("""{"token":"t","encryptionKey":"k"}""")))
+        assertEquals(false, PanoEnvelope.isError(null))
+        assertEquals(null, PanoEnvelope.errorCode(null))
     }
 }
