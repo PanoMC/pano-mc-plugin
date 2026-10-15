@@ -17,6 +17,21 @@ object SpigotServerUtil {
         }
     }
 
+    // True when the calling thread may run global (non-entity, non-region) work right now: the main
+    // thread on Bukkit/Spigot/Paper, the global region thread on Folia. Folia's isPrimaryThread()
+    // is also true on any region thread, so it is not enough on its own there.
+    fun isGlobalThread(): Boolean {
+        if (isFolia()) {
+            return try {
+                Bukkit::class.java.getMethod("isGlobalTickThread").invoke(null) as Boolean
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        return Bukkit.isPrimaryThread()
+    }
+
     fun detectServerType(): ServerType {
         return if (isFolia()) {
             ServerType.FOLIA

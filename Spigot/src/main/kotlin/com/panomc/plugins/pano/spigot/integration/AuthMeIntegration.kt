@@ -16,8 +16,6 @@ import fr.xephi.authme.events.LoginEvent
 import fr.xephi.authme.events.LogoutEvent
 import fr.xephi.authme.events.PasswordEncryptionEvent
 import fr.xephi.authme.events.RegisterEvent
-import fr.xephi.authme.security.crypts.EncryptionMethod
-import fr.xephi.authme.security.crypts.HashedPassword
 import io.vertx.core.http.WebSocket
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
@@ -38,52 +36,50 @@ import java.util.concurrent.ConcurrentHashMap
 
 class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, Listener {
 
-    private companion object {
-        // AuthMe's comparePassword always delegates to the platform (see onPasswordEncryptionEvent
-        // below) and never reads this value back, so it only needs to be non-null/non-empty and
-        // non-reversible — never the player's real password.
-        const val MANAGED_PASSWORD_PLACEHOLDER = "pano-managed"
-    }
-
-    private data class ConfigSetting(
+    internal data class ConfigSetting(
         val path: String,
         val expectedValue: Any,
         val getValue: (FileConfiguration) -> Any?,
         val logMessage: String
     )
 
-    private val requiredConfigSettings = listOf(
-        ConfigSetting(
-            path = "settings.security.passwordHash",
-            expectedValue = "CUSTOM",
-            getValue = { it.getString("settings.security.passwordHash") },
-            logMessage = "Set AuthMe password hash to CUSTOM"
-        ),
-        ConfigSetting(
-            path = "settings.registration.type",
-            expectedValue = "PASSWORD",
-            getValue = { it.getString("settings.registration.type") },
-            logMessage = "Set AuthMe register type to PASSWORD"
-        ),
-        ConfigSetting(
-            path = "settings.security.minPasswordLength",
-            expectedValue = 6,
-            getValue = { it.getInt("settings.security.minPasswordLength") },
-            logMessage = "Set AuthMe min password length to 6"
-        ),
-        ConfigSetting(
-            path = "settings.security.passwordMaxLength",
-            expectedValue = 128,
-            getValue = { it.getInt("settings.security.passwordMaxLength") },
-            logMessage = "Set AuthMe password max length to 128"
-        ),
-        ConfigSetting(
-            path = "settings.restrictions.allowedNicknameCharacters",
-            expectedValue = "[a-zA-Z0-9_]*",
-            getValue = { it.getString("settings.restrictions.allowedNicknameCharacters") },
-            logMessage = "Set AuthMe allowed nickname characters to [a-zA-Z0-9_]*"
+    internal companion object {
+        // Every path and value here exists unchanged in AuthMe 5.6.x, 5.7.x and 6.0.x;
+        // AuthMeCompatibilityTest checks them against each release's own settings classes.
+        val requiredConfigSettings = listOf(
+            ConfigSetting(
+                path = "settings.security.passwordHash",
+                expectedValue = "CUSTOM",
+                getValue = { it.getString("settings.security.passwordHash") },
+                logMessage = "Set AuthMe password hash to CUSTOM"
+            ),
+            ConfigSetting(
+                path = "settings.registration.type",
+                expectedValue = "PASSWORD",
+                getValue = { it.getString("settings.registration.type") },
+                logMessage = "Set AuthMe register type to PASSWORD"
+            ),
+            ConfigSetting(
+                path = "settings.security.minPasswordLength",
+                expectedValue = 6,
+                getValue = { it.getInt("settings.security.minPasswordLength") },
+                logMessage = "Set AuthMe min password length to 6"
+            ),
+            ConfigSetting(
+                path = "settings.security.passwordMaxLength",
+                expectedValue = 128,
+                getValue = { it.getInt("settings.security.passwordMaxLength") },
+                logMessage = "Set AuthMe password max length to 128"
+            ),
+            ConfigSetting(
+                path = "settings.restrictions.allowedNicknameCharacters",
+                expectedValue = "[a-zA-Z0-9_]*",
+                getValue = { it.getString("settings.restrictions.allowedNicknameCharacters") },
+                logMessage = "Set AuthMe allowed nickname characters to [a-zA-Z0-9_]*"
+            )
         )
-    )
+    }
+
     private val logger by lazy {
         panoPluginMain.getPanoLogger()
     }
@@ -247,7 +243,15 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
     // tasks (IllegalPluginAccessException) and there is no future tick to hop to - [onSchedulingRefused]
     // runs instead, synchronously, so it must be safe to call off-thread (e.g. just a log line).
     private fun runOnMainThread(onSchedulingRefused: () -> Unit, block: () -> Unit) {
-        if (Bukkit.isPrimaryThread()) {
+        if (SpigotServerUtil.isGlobalThread()) {
+            block()
+            return
+        }
+
+        // Folia disables plugins from its RegionShutdownThread after every region scheduler has
+        // halted: nothing ticks anymore that could race with [block], and nothing could be
+        // scheduled either, so run it right here instead of skipping the teardown.
+        if (SpigotServerUtil.isFolia() && isServerStopping()) {
             block()
             return
         }
@@ -258,7 +262,9 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
         }
 
         try {
-            Bukkit.getScheduler().runTask(panoPluginMain, Runnable(block))
+            // Folia (AuthMe ships a Folia build since 6.0) has no Bukkit scheduler; runGlobalTask
+            // picks its global region scheduler there and the Bukkit scheduler everywhere else.
+            SpigotServerUtil.runGlobalTask(panoPluginMain, block)
         } catch (e: Exception) {
             // e.g. IllegalPluginAccessException if the plugin was disabled in the gap between the
             // isEnabled check above and this call.
@@ -391,6 +397,14 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
         // performStop() is only ever entered via runOnMainThread(), so we're always on the main
         // thread here already - dispatch directly instead of hopping through reloadAuthMe()'s own
         // scheduler round trip.
+        //
+        // The one exception is Folia's shutdown (see runOnMainThread()): its RegionShutdownThread
+        // cannot dispatch commands, and AuthMe is about to be disabled right after us anyway.
+        if (SpigotServerUtil.isFolia() && !SpigotServerUtil.isGlobalThread() && isServerStopping()) {
+            logger.info("&eAuthMe integration is disabled.".colorize())
+            return
+        }
+
         try {
             // Bukkit disables plugins in reverse load order during a real shutdown, so AuthMe may
             // already be disabled (and its commands unregistered) by the time this runs.
@@ -808,7 +822,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             return
         }
         try {
-            Bukkit.getScheduler().runTask(panoPluginMain, Runnable {
+            SpigotServerUtil.runGlobalTask(panoPluginMain) {
                 // dispatchCommand() returns false for an unrecognized command instead of throwing, so
                 // without checking AuthMe is actually enabled and the dispatch actually succeeded, the
                 // log below would claim success even when AuthMe was never told to re-read anything.
@@ -823,7 +837,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
                     logger.warning("Could not reload AuthMe automatically.".colorize())
                     logger.warning("Please run '/authme reload' manually".colorize())
                 }
-            })
+            }
         } catch (e: Exception) {
             logger.warning("Could not reload AuthMe automatically: ${e.message}".colorize())
             logger.warning("Please run '/authme reload' manually".colorize())
@@ -895,26 +909,11 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
     }
 
     // Resolves a typed command line to Bukkit's canonical command name (following aliases and the
-    // plugin:label fallback-prefix form, and collapsing repeated whitespace) plus its first argument,
-    // so the unsupported-command guard below can't be bypassed by an alias like "/unreg" or
+    // plugin:label fallback-prefix form, and collapsing repeated whitespace) plus its arguments, so
+    // the guards below can't be bypassed by an alias like "/unreg", "/authme unr", "/authme r" or
     // "/authme:unregister" that a literal prefix match on the raw text would miss.
-    private fun resolveAuthMeCommand(message: String): Pair<String, String?> {
-        val tokens = message.removePrefix("/").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-
-        if (tokens.isEmpty()) {
-            return "" to null
-        }
-
-        val rawLabel = tokens[0].substringAfter(':')
-        val commandName = Bukkit.getPluginCommand(rawLabel)?.name?.lowercase() ?: rawLabel.lowercase()
-        val subLabel = tokens.getOrNull(1)?.lowercase()
-
-        return commandName to subLabel
-    }
-
-    private fun isUnregisterCommand(commandName: String, subLabel: String?): Boolean =
-        commandName == "unregister" || commandName == "unreg" ||
-            (commandName == "authme" && (subLabel == "unregister" || subLabel == "unreg"))
+    private fun resolveAuthMeCommand(commandLine: String): AuthMeCommandMatcher.ResolvedCommand =
+        AuthMeCommandMatcher.resolve(commandLine) { label -> Bukkit.getPluginCommand(label)?.name }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onPlayerCommandPreprocess(event: PlayerCommandPreprocessEvent) {
@@ -922,16 +921,15 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             return
         }
 
-        val msg = event.message.lowercase()
+        val command = resolveAuthMeCommand(event.message)
+        val action = AuthMeCommandMatcher.classify(command)
 
-        val (commandName, subLabel) = resolveAuthMeCommand(event.message)
-
-        if (isUnregisterCommand(commandName, subLabel)) {
+        if (action == AuthMeCommandMatcher.Action.SELF_UNREGISTER || action == AuthMeCommandMatcher.Action.ADMIN_UNREGISTER) {
             // Only the "/authme unregister" admin sub-command is exempt, and only with the admin
             // node — the bare "/unregister" / "/unreg" form (self-unregister) is always blocked,
             // otherwise a player could delete their own AuthMe row while Pano still believes the
             // account is registered, desyncing the two.
-            if (commandName == "authme" && event.player.hasPermission("authme.admin.unregister")) {
+            if (action == AuthMeCommandMatcher.Action.ADMIN_UNREGISTER && event.player.hasPermission("authme.admin.unregister")) {
                 return
             }
 
@@ -941,20 +939,19 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             return
         }
 
-        if (msg.startsWith("/authme reg") || msg.startsWith("/authme register")) {
+        if (action == AuthMeCommandMatcher.Action.ADMIN_REGISTER) {
             // If player doesn't have permission, let AuthMe handle the permission check
             if (!event.player.hasPermission("authme.admin.register")) {
                 return
             }
 
-            val args = event.message.split("\\s+".toRegex()) // split spaces
-
-            if (args.size != 4) {
+            // "<sub-label> <player> <password>"
+            if (command.args.size != 3) {
                 return
             }
 
-            val playerName = args[2]
-            val password = args[3]
+            val playerName = command.args[1]
+            val password = command.args[2]
 
             runBlocking {
                 val response =
@@ -996,7 +993,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             }
         }
 
-        if (msg.startsWith("/authme reload")) {
+        if (action == AuthMeCommandMatcher.Action.RELOAD) {
             // If player doesn't have permission, let AuthMe handle the permission check
             if (!event.player.hasPermission("authme.admin.reload")) {
                 return
@@ -1017,26 +1014,24 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
 
     @EventHandler(priority = EventPriority.HIGHEST)
     fun onServerCommandProcess(event: ServerCommandEvent) {
-        val msg = event.command.lowercase()
+        val command = resolveAuthMeCommand(event.command)
+        val action = AuthMeCommandMatcher.classify(command)
 
-        val (commandName, subLabel) = resolveAuthMeCommand(event.command)
-
-        if (isUnregisterCommand(commandName, subLabel)) {
+        if (action == AuthMeCommandMatcher.Action.SELF_UNREGISTER || action == AuthMeCommandMatcher.Action.ADMIN_UNREGISTER) {
             event.isCancelled = true
             event.sender.sendMessage("&cThis command is unsupported by Pano!".colorize())
             event.sender.sendMessage("&cCheckout docs: https://panomc.com/docs".colorize())
             return
         }
 
-        if (msg.startsWith("authme reg") || msg.startsWith("authme register")) {
-            val args = event.command.split("\\s+".toRegex()) // split spaces
-
-            if (args.size != 4) {
+        if (action == AuthMeCommandMatcher.Action.ADMIN_REGISTER) {
+            // "<sub-label> <player> <password>"
+            if (command.args.size != 3) {
                 return
             }
 
-            val playerName = args[2]
-            val password = args[3]
+            val playerName = command.args[1]
+            val password = command.args[2]
 
             runBlocking {
                 val response =
@@ -1077,7 +1072,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             }
         }
 
-        if (msg.startsWith("authme reload")) {
+        if (action == AuthMeCommandMatcher.Action.RELOAD) {
             authMePlugin.reloadConfig()
 
             if (!isConfigCompatible()) {
@@ -1128,56 +1123,18 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
         }
     }
 
+    private fun authenticateWithPlatform(playerName: String, password: String): Boolean = runBlocking {
+        platformManager.sendMessageAwaitResponse<PlayerAuthenticateMessage>(
+            PlayerAuthenticateRequest(
+                playerName,
+                password
+            ),
+            PlayerAuthenticateMessage::class.java
+        ).success
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
     fun onPasswordEncryptionEvent(event: PasswordEncryptionEvent) {
-        event.method = object : EncryptionMethod {
-            override fun computeHash(
-                password: String,
-                name: String
-            ): HashedPassword {
-                handleComputeHash(name, password)
-
-                // Never persist the real password: AuthMe writes this verbatim to its datasource,
-                // and comparePassword() below ignores it entirely, delegating to the platform.
-                return HashedPassword(MANAGED_PASSWORD_PLACEHOLDER)
-            }
-
-            override fun computeHash(
-                password: String,
-                salt: String?,
-                name: String
-            ): String {
-                handleComputeHash(name, password)
-
-                return MANAGED_PASSWORD_PLACEHOLDER
-            }
-
-            override fun comparePassword(
-                password: String,
-                hashedPassword: HashedPassword?,
-                name: String
-            ): Boolean {
-                val success: Boolean
-
-                runBlocking {
-                    val response = platformManager.sendMessageAwaitResponse<PlayerAuthenticateMessage>(
-                        PlayerAuthenticateRequest(
-                            name,
-                            password
-                        ),
-                        PlayerAuthenticateMessage::class.java
-                    )
-
-                    success = response.success
-                }
-
-                return success
-            }
-
-            override fun generateSalt(): String? = null
-
-            override fun hasSeparateSalt(): Boolean = false
-
-        }
+        event.method = PanoAuthMeEncryptionMethod(::handleComputeHash, ::authenticateWithPlatform)
     }
 }
