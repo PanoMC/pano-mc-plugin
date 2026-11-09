@@ -284,4 +284,37 @@ class ScheduleRunnerTest {
         assertTrue(pluginMain.dispatched.isEmpty())
         assertTrue(store.read().isEmpty())
     }
+
+    @Test
+    fun `runs no console command while the operator has console access turned off`() {
+        runner.stop()
+        runner = ScheduleRunner(vertx, pluginMain, store, { sent.add(it) }, logger, { false }) { backups.add(it) }
+
+        runner.sync(
+            SyncSchedulesMessage(
+                schedules = listOf(
+                    schedule(
+                        warnMinutes = 5,
+                        tasks = listOf(
+                            SyncScheduleTaskEntry("COMMAND", mapOf("command" to "op attacker")),
+                            SyncScheduleTaskEntry("POWER", mapOf("action" to "RESTART"))
+                        )
+                    )
+                )
+            )
+        )
+
+        runBlocking {
+            runner.tick(at("2026-06-01T03:55:00"))
+            runner.tick(at("2026-06-01T04:00:00"))
+        }
+
+        assertTrue(pluginMain.dispatched.isEmpty())
+        assertEquals(0, pluginMain.restarts)
+
+        val run = runs().single()
+
+        assertFalse(run.ok)
+        assertEquals(ScheduleRunner.COMMANDS_DISABLED_ERROR, run.error)
+    }
 }

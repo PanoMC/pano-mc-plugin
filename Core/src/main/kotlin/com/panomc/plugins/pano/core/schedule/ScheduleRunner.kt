@@ -39,6 +39,11 @@ class ScheduleRunner(
     private val store: ScheduleStore,
     private val send: (PlatformRequest) -> Unit,
     private val logger: Logger,
+    /**
+     * Whether the operator allows console commands (config.conf `console.enabled`). A COMMAND step
+     * is a console command like any other, so it obeys the same switch as EXECUTE_COMMAND.
+     */
+    private val commandsEnabled: () -> Boolean = { true },
     /** Takes a backup, through whatever serialises the heavy file work. */
     private val backup: suspend (BackupCreateMessage) -> Unit
 ) {
@@ -156,7 +161,7 @@ class ScheduleRunner(
     private fun warnIfDue(entry: SyncScheduleEntry, now: Long, minute: Long) {
         val offsets = ScheduleWarnings.offsetsFor(entry.warnMinutes ?: 0)
 
-        if (offsets.isEmpty() || isProxy()) {
+        if (offsets.isEmpty() || isProxy() || !commandsEnabled()) {
             // A proxy has no `say`: warning its players would mean an unknown-command line in the
             // console every five minutes and nothing at all in anybody's chat.
             return
@@ -215,6 +220,8 @@ class ScheduleRunner(
 
                 if (command.isEmpty()) {
                     "The command step had no command."
+                } else if (!commandsEnabled()) {
+                    COMMANDS_DISABLED_ERROR
                 } else {
                     dispatch(command)
                 }
@@ -315,6 +322,8 @@ class ScheduleRunner(
 
     companion object {
         const val TICK_INTERVAL_MILLIS = 60_000L
+
+        const val COMMANDS_DISABLED_ERROR = "Console commands are turned off on this server (console.enabled = false in config.conf)."
 
         private const val MINUTE_MILLIS = 60_000L
         private const val GUARD_RETENTION_MINUTES = 5

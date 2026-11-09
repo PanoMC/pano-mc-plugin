@@ -304,7 +304,8 @@ class PlatformManager(
         pluginMain,
         ScheduleStore(pluginMain.getDataFolder(), logger),
         ::sendMessage,
-        logger
+        logger,
+        { consoleStreamer.isEnabled() }
     ) { message ->
         fileAgent.serialised { backupService.create(message) }
     }
