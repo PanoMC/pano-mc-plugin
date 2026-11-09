@@ -53,7 +53,7 @@ object SpigotServerUtil {
     }
 
     fun getPlayerIp(playerName: String): String? {
-        val player = Bukkit.getPlayer(playerName) ?: return null
+        val player = Bukkit.getPlayerExact(playerName) ?: return null
         if (!player.isOnline) return null
 
         return getPlayerIp(player)

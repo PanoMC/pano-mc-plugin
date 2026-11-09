@@ -983,7 +983,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
                 event.player.sendMessage("&2Successfully registered player \"$playerName\".".colorize())
                 logger.info("&2Successfully registered player \"$playerName\".".colorize())
 
-                val player = Bukkit.getPlayer(playerName)
+                val player = Bukkit.getPlayerExact(playerName)
 
                 if ((player?.isOnline ?: false) && platformManager.serverSettings.authKickAfterRegister) {
                     val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")
@@ -1062,7 +1062,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
 
                 logger.info("&2Successfully registered player \"$playerName\".".colorize())
 
-                val player = Bukkit.getPlayer(playerName)
+                val player = Bukkit.getPlayerExact(playerName)
 
                 if ((player?.isOnline ?: false) && platformManager.serverSettings.authKickAfterRegister) {
                     val message = i18nManager.translate(i18nManager.platformLocale, "auth.register-kick")

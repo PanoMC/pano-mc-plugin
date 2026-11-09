@@ -944,7 +944,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         // PanoPluginMain.kickPlayer's contract is raw '&' in, rendered out — player.kickPlayer()
         // (via SpigotServerUtil.kickPlayer) does no conversion of its own, unlike the other
         // platforms' kick calls.
-        SpigotServerUtil.kickPlayer(this, server.getPlayer(player) ?: return, translateColor(message))
+        SpigotServerUtil.kickPlayer(this, server.getPlayerExact(player) ?: return, translateColor(message))
     }
 
     override fun sendPlayerMessage(uuid: String, username: String, message: String): Boolean {
