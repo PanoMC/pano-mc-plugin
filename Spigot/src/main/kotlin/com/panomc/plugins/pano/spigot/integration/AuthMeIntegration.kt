@@ -1101,10 +1101,32 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
                     IsPlayerRegisteredMessage::class.java
                 )
 
-            if (!response.registered) {
-                pendingRegisterPasswords[playerName.lowercase()] = password
+            when (AuthMeHashDecision.decide(response.registered, authMeApi.isRegistered(playerName))) {
+                AuthMeHashDecision.Action.PENDING_REGISTER -> {
+                    pendingRegisterPasswords[playerName.lowercase()] = password
 
-                return@runBlocking
+                    return@runBlocking
+                }
+
+                AuthMeHashDecision.Action.REFUSE_REGISTER -> {
+                    // AuthMe has no row for a name Pano already knows, so this is a /register, not a
+                    // verified password change: never forward it as one. Throwing aborts AuthMe's
+                    // registration before it saves anything; the kick sends the player back through
+                    // the pre-login reconcile, which provisions the AuthMe row so the real owner can /login.
+                    logger.warning("&cRefused in-game registration of \"$playerName\": the name is already registered on the website.".colorize())
+
+                    Bukkit.getPlayerExact(playerName)?.let { player ->
+                        SpigotServerUtil.kickPlayer(
+                            panoPluginMain,
+                            player,
+                            "This name is already registered. Please rejoin and use /login.".colorize()
+                        )
+                    }
+
+                    throw IllegalStateException("\"$playerName\" is already registered on the platform")
+                }
+
+                AuthMeHashDecision.Action.CHANGE_PASSWORD -> Unit
             }
 
             val request = ChangePasswordRequest(playerName, password)
