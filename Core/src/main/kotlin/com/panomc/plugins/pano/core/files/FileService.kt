@@ -160,14 +160,27 @@ class FileService(
 
         return success()
             .put("path", ServerFileDenylist.normalise(path))
-            .put("content", decoded ?: "")
+            .put("content", decoded?.let { SecretRedaction.redact(path, it) } ?: "")
             .put("size", size)
             .put("truncated", size > limit)
             .put("binary", decoded == null)
     }
 
     private fun write(root: File, path: String?, content: String?): JsonObject {
-        val text = content ?: ""
+        val text = if (SecretRedaction.applies(path)) {
+            // The editor was shown the secrets hidden; a save that kept them hidden keeps them.
+            val current = try {
+                val existing = resolve(root, path)
+
+                if (existing.isFile) existing.readText(Charsets.UTF_8) else null
+            } catch (_: Exception) {
+                null
+            }
+
+            SecretRedaction.restore(path, content ?: "", current)
+        } else {
+            content ?: ""
+        }
         val bytes = text.toByteArray(Charsets.UTF_8)
 
         if (bytes.size > MAX_WRITE_BYTES) {
