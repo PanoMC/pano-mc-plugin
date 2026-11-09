@@ -157,7 +157,14 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
     }
 
     override fun onDisconnect() {
-        stop()
+        // Only a deliberate unlink (platform config already removed) tears the integration down.
+        // A transient WebSocket drop must keep the provider installed: removing it would let
+        // LimboAuth fall back to its own local passwords and offer /register for names that exist
+        // in Pano for the whole outage. With the provider still installed, every login or
+        // registration attempt during the outage is refused instead (see the provider below).
+        if (!platformManager.isPlatformConfigured()) {
+            stop()
+        }
     }
 
     override fun onServerSettingsChanged(serverSettings: GetServerSettingsMessage) {
@@ -284,11 +291,15 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
     // The central-authority delegation: LimboAuth asks us to verify every password. We answer with
     // Pano's result, or null for accounts Pano does not manage so LimboAuth's local BCrypt can still
     // serve purely-local logins. onRegister / onPasswordChanged sync game-side changes back to Pano.
+    //
+    // Throwing is how this provider says "refused" or "Pano cannot answer right now": the
+    // pano-limbo-auth fork then rejects the login, or creates / changes nothing locally. Returning
+    // quietly while Pano is unreachable would let LimboAuth accept a local password instead.
     private fun createExternalPasswordProvider(): ExternalPasswordProvider =
         object : ExternalPasswordProvider {
             override fun verifyPassword(lowercaseNickname: String, password: String): Boolean? = runBlocking {
                 if (platformManager.getWebSocket() == null) {
-                    return@runBlocking null
+                    throw IllegalStateException(PLATFORM_UNAVAILABLE)
                 }
 
                 val registeredResponse = platformManager.sendMessageAwaitResponse<IsPlayerRegisteredMessage>(
@@ -312,7 +323,7 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
             override fun onRegister(lowercaseNickname: String, password: String, ip: String) {
                 runBlocking {
                     if (platformManager.getWebSocket() == null) {
-                        return@runBlocking
+                        throw IllegalStateException(PLATFORM_UNAVAILABLE)
                     }
 
                     val response = platformManager.sendMessageAwaitResponse<RegisterPlayerMessage>(
@@ -323,7 +334,8 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
                     if (response.error != null) {
                         logger.severe("&cAn error occurred during the registration of \"$lowercaseNickname\": ${response.error}".colorize())
 
-                        return@runBlocking
+                        // e.g. the name is already registered in Pano: LimboAuth must not create it.
+                        throw IllegalStateException("Pano refused the registration: ${response.error}")
                     }
 
                     logger.info("&2Successfully registered player \"$lowercaseNickname\".".colorize())
@@ -333,7 +345,7 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
             override fun onPasswordChanged(lowercaseNickname: String, newPassword: String) {
                 runBlocking {
                     if (platformManager.getWebSocket() == null) {
-                        return@runBlocking
+                        throw IllegalStateException(PLATFORM_UNAVAILABLE)
                     }
 
                     val response = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
@@ -343,8 +355,14 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
 
                     if (response.error != null) {
                         logger.severe("&cAn error occurred during the changing password of \"$lowercaseNickname\": ${response.error}".colorize())
+
+                        throw IllegalStateException("Pano refused the password change: ${response.error}")
                     }
                 }
             }
         }
+
+    private companion object {
+        const val PLATFORM_UNAVAILABLE = "Not connected to Pano Platform"
+    }
 }
