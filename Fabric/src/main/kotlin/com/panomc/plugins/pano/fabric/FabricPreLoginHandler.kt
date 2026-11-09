@@ -12,6 +12,7 @@ import net.minecraft.server.network.CommonListenerCookie
 import net.minecraft.server.level.ServerPlayer
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo
 import java.util.Collections
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -36,6 +37,18 @@ object FabricPreLoginHandler {
     // checking (and hopping off-thread) again.
     private val recheckedConnections: MutableSet<Connection> =
         Collections.newSetFromMap(ConcurrentHashMap())
+
+    // Profiles whose login is currently held for the check. Vanilla's duplicate-login check ran
+    // at the login stage and only sees players already placed, so a second connection with the
+    // same profile arriving during the hold would otherwise be placed as well: two ServerPlayers
+    // for one UUID (inventory duplication / data loss).
+    private val pendingProfiles: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
+
+    private fun refuse(connection: Connection, message: String) {
+        val reason = FabricTextHelper.parseColoredText(message)
+        connection.send(ClientboundDisconnectPacket(reason))
+        connection.disconnect(reason)
+    }
 
     fun handlePreLogin(
         connection: Connection,
@@ -75,6 +88,13 @@ object FabricPreLoginHandler {
         // Hold this connection's login, not the server thread: cancel the synchronous placement
         // and finish it asynchronously once the platform answers (or the timeout below fires).
         ci.cancel()
+
+        val profileId = player.getUUID()
+
+        if (!pendingProfiles.add(profileId)) {
+            refuse(connection, "&cYou are already logging in. Please try again.")
+            return
+        }
 
         // CoroutineStart.ATOMIC, not the default: SERVER_STOPPING can cancel pluginScope from a
         // different thread than this one (e.g. the JVM shutdown hook Minecraft installs to halt()
@@ -123,8 +143,17 @@ object FabricPreLoginHandler {
                 // CancellationException. server.execute() only posts a Runnable (not a suspend
                 // call), so it runs fine even though this coroutine's Job is already cancelled.
                 server.execute {
+                    // Released on the main thread, in the same task that places the player, so a
+                    // second login can never slip in between the release and the placement.
+                    pendingProfiles.remove(profileId)
+
                     if (!connection.isConnected) {
                         // Player already left while the check was in flight; nothing left to do.
+                        return@execute
+                    }
+
+                    if (!denied && server.getPlayerList().getPlayer(profileId) != null) {
+                        refuse(connection, "&cYou are already connected to this server.")
                         return@execute
                     }
 
