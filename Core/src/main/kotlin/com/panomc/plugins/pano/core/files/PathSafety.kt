@@ -94,6 +94,42 @@ object PathSafety {
         return resolved.toFile()
     }
 
+    /**
+     * [file]'s path relative to [root] after following symlinks, with forward slashes: what the
+     * request really touches, as opposed to what it named. The part of [file] that does not exist
+     * yet is appended as written to the real path of its nearest existing ancestor. Null when the
+     * root cannot be resolved or the real path is not under it.
+     */
+    fun realRelative(root: File, file: File): String? {
+        val realRoot = try {
+            root.toPath().toAbsolutePath().normalize().toRealPath()
+        } catch (_: Exception) {
+            return null
+        }
+
+        var existing: Path? = file.toPath().toAbsolutePath().normalize()
+        val missing = ArrayDeque<String>()
+
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing.fileName?.let { missing.addFirst(it.toString()) }
+            existing = existing.parent
+        }
+
+        var real = try {
+            existing?.toRealPath() ?: return null
+        } catch (_: Exception) {
+            return null
+        }
+
+        missing.forEach { real = real.resolve(it) }
+
+        if (!real.startsWith(realRoot)) {
+            return null
+        }
+
+        return realRoot.relativize(real).toString().replace(File.separatorChar, '/')
+    }
+
     /** Walks up to the nearest existing ancestor and checks it really lives under [rootPath]. */
     private fun requireRealPathInside(rootPath: Path, resolved: Path) {
         val realRoot = try {

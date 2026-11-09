@@ -396,7 +396,17 @@ class FileService(
             throw IllegalArgumentException(ERROR_PATH_DENIED)
         }
 
-        return PathSafety.resolveRelative(root, path)
+        val file = PathSafety.resolveRelative(root, path)
+
+        // Checked again on what the path really points at: a symlink inside the server that leads
+        // to a denied file must not be a second name for it.
+        val real = PathSafety.realRelative(root, file)
+
+        if (real != null && ServerFileDenylist.isDenied(real)) {
+            throw IllegalArgumentException(ERROR_PATH_DENIED)
+        }
+
+        return file
     }
 
     /** Resolves a path for an operation that changes or removes something. */
@@ -409,7 +419,20 @@ class FileService(
             throw InUseException()
         }
 
-        return PathSafety.resolveRelative(root, path)
+        val file = PathSafety.resolveRelative(root, path)
+
+        // The same rules again for what the path really points at (see resolve).
+        val real = PathSafety.realRelative(root, file)
+
+        if (real != null && !ServerFileDenylist.isMutable(real)) {
+            throw IllegalArgumentException(ERROR_PATH_DENIED)
+        }
+
+        if (real != null && loadedJars.isInUse(real)) {
+            throw InUseException()
+        }
+
+        return file
     }
 
     private fun mode(file: File): String? = try {

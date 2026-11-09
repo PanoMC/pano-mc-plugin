@@ -132,6 +132,33 @@ class FileServiceTest {
     }
 
     @Test
+    fun `a symlink to this server's credentials is not a second name for them`() {
+        File(root, "plugins/Pano").mkdirs()
+        File(root, "plugins/Pano/config.conf").writeText("token = secret")
+
+        try {
+            Files.createSymbolicLink(File(root, "cfg").toPath(), File(root, "plugins/Pano/config.conf").toPath())
+            Files.createSymbolicLink(File(root, "panodir").toPath(), File(root, "plugins/Pano").toPath())
+        } catch (_: Exception) {
+            // No symlink support here (e.g. Windows without the privilege): nothing to check.
+            return
+        }
+
+        listOf("cfg", "panodir/config.conf").forEach { path ->
+            val read = run(FileService.FILE_READ, FileRequestMessage(path = path))
+
+            assertEquals(false, read.getBoolean("ok"), path)
+            assertEquals(FileService.ERROR_PATH_DENIED, read.getString("error"), path)
+
+            val written = run(FileService.FILE_WRITE, FileRequestMessage(path = path, content = "token = attacker"))
+
+            assertEquals(false, written.getBoolean("ok"), path)
+        }
+
+        assertEquals("token = secret", File(root, "plugins/Pano/config.conf").readText())
+    }
+
+    @Test
     fun `refuses to touch a jar the running server has loaded`() {
         File(root, "plugins").mkdirs()
         File(root, "plugins/LuckPerms.jar").writeText("jar")
