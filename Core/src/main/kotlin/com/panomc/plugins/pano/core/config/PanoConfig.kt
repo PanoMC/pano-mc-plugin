@@ -51,7 +51,10 @@ data class PanoConfig(
             var port: Int = 8080,
             var ssl: Boolean = false,
             var token: String = "",
-            @SerializedName("encryption-key") var encryptionKey: String = ""
+            @SerializedName("encryption-key") var encryptionKey: String = "",
+            // Set once this Pano has agreed to the secure channel (channel v2); from then on a
+            // connection without it is refused, so a stripped header cannot turn it off.
+            @SerializedName("channel-v2") var channelV2: Boolean = false
         )
 
         private val gson = GsonBuilder()

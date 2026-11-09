@@ -59,6 +59,7 @@ import com.panomc.plugins.pano.core.platform.request.OnServerConnectRequest
 import com.panomc.plugins.pano.core.util.Aes256GcmUtil
 import com.panomc.plugins.pano.core.util.EncryptUtil
 import com.panomc.plugins.pano.core.util.ImageUtil
+import io.vertx.core.Future
 import io.vertx.core.Vertx
 import io.vertx.core.buffer.Buffer
 import io.vertx.core.http.*
@@ -116,6 +117,26 @@ class PlatformManager(
     // (admits a banned player) (platform-core-XX).
     @Volatile
     private var webSocket: WebSocket? = null
+
+    // The channel-v2 state of the current connection (MC-PROTOCOL-SPEC.md): [channelSocket] is the
+    // socket [channel] belongs to, so a frame for a socket that has since been replaced is never
+    // sealed with another connection's keys. A null [channel] on the current socket means v1.
+    @Volatile
+    private var channel: SecureChannel? = null
+
+    @Volatile
+    private var channelSocket: WebSocket? = null
+
+    /** What Pano agreed to on the current connection (e.g. `password-check`); empty for an older Pano. */
+    @Volatile
+    var agreedCapabilities: Set<String> = emptySet()
+        private set
+
+    fun hasCapability(capability: String): Boolean = capability in agreedCapabilities
+
+    // Sealing and writing happen under one lock: channel v2 frames carry a sequence number and must
+    // reach the socket in the order they were sealed.
+    private val sendLock = Any()
 
     // Volatile: written from the /pano command thread (connectNewPlatform/disconnectPlatform no
     // longer run on the calling server thread) and read by the retry loop on the event loop
@@ -852,6 +873,13 @@ class PlatformManager(
 
         webSocketConnectOptions.putHeader("Authorization", "Bearer $token")
 
+        // Channel v2 + password check (MC-PROTOCOL-SPEC.md): offered on every connect with a fresh
+        // nonce; an older Pano ignores both headers and the connection stays on v1.
+        val pluginNonce = SecureChannel.newNonce()
+
+        webSocketConnectOptions.putHeader(SecureChannel.CAPABILITIES_HEADER, SecureChannel.OFFERED.joinToString(","))
+        webSocketConnectOptions.putHeader(SecureChannel.NONCE_HEADER, SecureChannel.encodeNonce(pluginNonce))
+
         val webSocket: WebSocket
 
         try {
@@ -893,13 +921,48 @@ class PlatformManager(
             return ConnectOutcome.RETRY
         }
 
+        val negotiatedChannel = try {
+            negotiateChannel(webSocket, pluginNonce, platformConfig)
+        } catch (exception: Exception) {
+            logger.severe(pluginMain.translateColor("&cError: Refused the connection to Pano Platform: ${exception.message}"))
+
+            try {
+                webSocket.close().coAwait()
+            } catch (_: Exception) {
+            }
+
+            return ConnectOutcome.RETRY
+        }
+
         logger.info(pluginMain.translateColor("&2Connected successfully to the platform!"))
+
+        // Published before the socket itself, so nothing can send on this socket without its channel.
+        channel = negotiatedChannel
+        channelSocket = webSocket
 
         this.webSocket = webSocket
 
-        webSocket.textMessageHandler { msg ->
+        webSocket.textMessageHandler { frame ->
+            // Opened here, in arrival order on the socket's own thread, because channel v2 frames
+            // must be read in exactly the order they were sent; only the handling is launched.
+            val text = try {
+                openFrame(negotiatedChannel, frame)
+            } catch (exception: SecurityException) {
+                // A replayed, reordered, forged or v1 frame on a v2 connection: nothing more from
+                // this socket can be trusted. Closing it starts a fresh connection with new keys.
+                logger.severe(pluginMain.translateColor("&cError: Received a message from Pano Platform that failed the channel check (${exception.message}); reconnecting."))
+
+                webSocket.close()
+
+                return@textMessageHandler
+            } catch (exception: Exception) {
+                logger.severe("Failed to process platform message (${exception.javaClass.simpleName}): ${exception.message}")
+
+                return@textMessageHandler
+            }
+
             CoroutineScope(vertx.dispatcher()).launch {
-                onWebsocketTextMessage(msg)
+                onWebsocketTextMessage(text)
             }
         }
 
@@ -1033,7 +1096,72 @@ class PlatformManager(
         pluginMain.onConnectionEstablished(webSocket)
     }
 
-    private suspend fun onWebsocketTextMessage(encryptedMessage: String) {
+    /**
+     * Agrees channel v2 for [webSocket] from Pano's upgrade response, or returns null for v1.
+     *
+     * Throws when the answer cannot be used: channel v2 agreed without a valid nonce, or no channel
+     * v2 from a Pano that agreed to it before (a stripped header on a plain connection would
+     * otherwise silently turn replay protection off).
+     */
+    private fun negotiateChannel(webSocket: WebSocket, pluginNonce: ByteArray, platformConfig: PanoConfig.Companion.PlatformConfig): SecureChannel? {
+        val headers = webSocket.headers()
+        val agreed = SecureChannel.parseCapabilities(headers?.get(SecureChannel.CAPABILITIES_HEADER))
+
+        agreedCapabilities = agreed
+
+        if (SecureChannel.CAP_CHANNEL_V2 !in agreed) {
+            if (platformConfig.channelV2) {
+                throw SecurityException("this Pano used the secure channel before and did not offer it now. If the platform was downgraded on purpose, connect again with /pano connect.")
+            }
+
+            return null
+        }
+
+        val platformNonce = SecureChannel.decodeNonce(headers?.get(SecureChannel.NONCE_HEADER))
+            ?: throw SecurityException("the secure channel was agreed without a valid nonce.")
+
+        validateEncryptionKey()
+
+        val secureChannel = SecureChannel.forPlugin(encryptionKey!!.encoded, pluginNonce, platformNonce)
+
+        if (!platformConfig.channelV2) {
+            platformConfig.channelV2 = true
+
+            if (!configManager.saveConfig()) {
+                logger.warning(pluginMain.translateColor("&6Could not save to config.conf that this Pano uses the secure channel."))
+            }
+        }
+
+        return secureChannel
+    }
+
+    /** The JSON text of one received frame, through [secureChannel] (v2) or the shared key (v1). */
+    private fun openFrame(secureChannel: SecureChannel?, frame: String): String {
+        if (secureChannel != null) {
+            return secureChannel.open(frame)
+        }
+
+        validateEncryptionKey()
+
+        return Aes256GcmUtil.decrypt(frame, encryptionKey!!)
+    }
+
+    /** Seals [message] for [socket] and writes it, in sealing order (see [sendLock]). */
+    private fun writeMessage(socket: WebSocket, message: String): Future<Void> = synchronized(sendLock) {
+        val secureChannel = if (channelSocket === socket) channel else null
+
+        val frame = if (secureChannel != null) {
+            secureChannel.seal(message)
+        } else {
+            validateEncryptionKey()
+
+            Aes256GcmUtil.encrypt(message, encryptionKey!!)
+        }
+
+        socket.writeTextMessage(frame)
+    }
+
+    private suspend fun onWebsocketTextMessage(msg: String) {
         // Every step below can throw (bad key, AEAD failure, malformed JSON, an unguarded
         // handler...). This coroutine is fire-and-forget from webSocket.textMessageHandler, so
         // without a catch here any of those aborts the frame silently and, if it was a response
@@ -1043,8 +1171,6 @@ class PlatformManager(
         var pending: PendingRequest? = null
 
         try {
-            validateEncryptionKey()
-            val msg = Aes256GcmUtil.decrypt(encryptedMessage, encryptionKey!!)
             val json = JsonObject(msg)
             val event = json.getString("event")
             json.remove("event")
@@ -1369,6 +1495,8 @@ class PlatformManager(
         platformConfig.ssl = ssl
         platformConfig.token = token
         platformConfig.encryptionKey = encryptionKey
+        // A new link: whether it speaks the secure channel is learned again on its first connect.
+        platformConfig.channelV2 = false
 
         return configManager.saveConfig()
     }
@@ -1385,6 +1513,7 @@ class PlatformManager(
         platformConfig.ssl = false
         platformConfig.token = ""
         platformConfig.encryptionKey = ""
+        platformConfig.channelV2 = false
 
         synchronized(encryptionKeyLock) {
             encryptionKey = null
@@ -1473,10 +1602,9 @@ class PlatformManager(
     fun sendMessage(platformRequest: PlatformRequest) {
         validateEncryptionKey()
 
-        val message = platformRequest.encode()
-        val encryptedMessage = Aes256GcmUtil.encrypt(message, encryptionKey!!)
+        val socket = webSocket ?: return
 
-        webSocket?.writeTextMessage(encryptedMessage)
+        writeMessage(socket, platformRequest.encode())
     }
 
     suspend fun <T : PlatformMessageResponse> sendMessageAwaitResponse(
@@ -1499,10 +1627,9 @@ class PlatformManager(
 
         try {
             val message = platformRequest.encode()
-            val encryptedMessage = Aes256GcmUtil.encrypt(message, encryptionKey!!)
 
             try {
-                socket.writeTextMessage(encryptedMessage).coAwait()
+                writeMessage(socket, message).coAwait()
             } catch (exception: Exception) {
                 deferred.completeExceptionally(exception)
                 throw exception
