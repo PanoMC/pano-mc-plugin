@@ -3,6 +3,7 @@ package com.panomc.plugins.pano.core.files
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -36,6 +37,11 @@ object ZipTool {
      *
      * [onFile] hears the relative path of every file (not directory) that went in, which is how a
      * backup knows its `fileCount` without walking the tree twice.
+     *
+     * Symbolic links below a selected path are skipped, never followed, as in snapshots and
+     * multi-file downloads: a link can point anywhere on the machine, and an archive that carried
+     * what it points at could neither be restored (the extractor refuses entries under a link that
+     * leaves the server) nor be trusted to hold only this server's files.
      */
     fun archive(
         root: File,
@@ -58,7 +64,13 @@ object ZipTool {
                     return@forEach
                 }
 
-                source.walkTopDown().forEach inner@{ file ->
+                source.walkTopDown().onEnter { directory ->
+                    directory == source || !Files.isSymbolicLink(directory.toPath())
+                }.forEach inner@{ file ->
+                    if (file != source && Files.isSymbolicLink(file.toPath())) {
+                        return@inner
+                    }
+
                     val relative = relativeName(root, file)
 
                     if (relative.isEmpty() || ServerFileDenylist.isDenied(relative) || exclude(relative)) {

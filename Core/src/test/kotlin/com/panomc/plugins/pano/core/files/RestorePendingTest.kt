@@ -149,6 +149,39 @@ class RestorePendingTest {
     }
 
     @Test
+    fun `an archive the extractor would refuse fails before any world is emptied`() {
+        val outside = Files.createTempDirectory("pano-restore-outside").toFile()
+
+        try {
+            File(root, "world").mkdirs()
+            File(root, "world/level.dat").writeText("now")
+            File(root, "plugins/dynmap").mkdirs()
+
+            try {
+                Files.createSymbolicLink(File(root, "plugins/dynmap/web").toPath(), outside.toPath())
+            } catch (_: Exception) {
+                // No symlink support here (e.g. Windows without the privilege): nothing to check.
+                return
+            }
+
+            // The world comes first, so a restore that only noticed the bad entry while extracting
+            // would already have emptied it.
+            writeBackup("backup-1", linkedMapOf("world/level.dat" to "then", "plugins/dynmap/web/index.html" to "x"))
+
+            RestorePending.arm(root, RestorePending.Marker(backupId = "backup-1", at = 1L))
+
+            val outcome = RestorePending.apply(root, logger)
+
+            assertNotNull(outcome)
+            assertFalse(outcome.ok)
+            assertEquals("now", File(root, "world/level.dat").readText())
+            assertFalse(File(outside, "index.html").exists())
+        } finally {
+            outside.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `a backup that is gone fails the restore instead of the boot`() {
         RestorePending.arm(root, RestorePending.Marker(backupId = "missing", taskId = "task-1", at = 1L))
 

@@ -185,6 +185,12 @@ object RestorePending {
             }
         }
 
+        // Every entry must also land inside the server, which is what the extractor checks per
+        // entry. Checked for all of them up front, so an archive the extractor would refuse
+        // halfway (an entry under a directory that is now a link out of the server) fails before
+        // any world has been emptied instead of after.
+        names.forEach { name -> PathSafety.resolveRelative(serverDirectory, name) }
+
         WorldDirectories.worldDirectoriesIn(names).forEach { world ->
             WorldDirectories.clearContents(serverDirectory, world) { relative -> isPanoOwned(relative) }
         }
