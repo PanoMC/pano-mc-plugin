@@ -190,6 +190,30 @@ class FileServiceTest {
     }
 
     @Test
+    fun `a folder holding a loaded jar cannot be deleted or renamed`() {
+        File(root, "mods").mkdirs()
+        File(root, "mods/LuckPerms.jar").writeText("jar")
+        File(root, "old-mods/nested").mkdirs()
+        File(root, "old-mods/nested/Spare.jar").writeText("jar")
+
+        val deleted = run(FileService.FILE_DELETE, FileRequestMessage(paths = listOf("mods")))
+
+        assertEquals(false, deleted.getBoolean("ok"))
+        assertEquals(LoadedJars.ERROR_IN_USE, deleted.getString("error"))
+        assertTrue(File(root, "mods/LuckPerms.jar").isFile)
+
+        val renamed = run(FileService.FILE_RENAME, FileRequestMessage(from = "mods", to = "mods-off"))
+
+        assertEquals(false, renamed.getBoolean("ok"))
+        assertEquals(LoadedJars.ERROR_IN_USE, renamed.getString("error"))
+        assertTrue(File(root, "mods/LuckPerms.jar").isFile)
+
+        // A folder of jars nothing has loaded stays removable.
+        assertTrue(run(FileService.FILE_DELETE, FileRequestMessage(paths = listOf("old-mods"))).getBoolean("ok"))
+        assertFalse(File(root, "old-mods").exists())
+    }
+
+    @Test
     fun `a delete batch holding a loaded jar removes nothing at all`() {
         File(root, "plugins").mkdirs()
         File(root, "plugins/LuckPerms.jar").writeText("jar")

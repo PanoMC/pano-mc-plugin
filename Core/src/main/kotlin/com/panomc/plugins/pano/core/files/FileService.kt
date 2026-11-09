@@ -213,12 +213,12 @@ class FileService(
 
         // Every path is vetted before a single file is removed, so a selection holding one loaded
         // jar is refused whole rather than half-applied.
-        requested.forEach { path -> resolveMutable(root, path) }
+        requested.forEach { path -> resolveMutable(root, path, removesTree = true) }
 
         var removed = 0
 
         requested.forEach { path ->
-            val file = resolveMutable(root, path)
+            val file = resolveMutable(root, path, removesTree = true)
 
             if (!file.exists()) {
                 return@forEach
@@ -237,7 +237,7 @@ class FileService(
     }
 
     private fun rename(root: File, from: String?, to: String?): JsonObject {
-        val source = resolveMutable(root, from)
+        val source = resolveMutable(root, from, removesTree = true)
         val target = resolveMutable(root, to)
 
         if (!source.exists()) {
@@ -409,8 +409,11 @@ class FileService(
         return file
     }
 
-    /** Resolves a path for an operation that changes or removes something. */
-    private fun resolveMutable(root: File, path: String?): File {
+    /**
+     * Resolves a path for an operation that changes or removes something. [removesTree] is set by
+     * delete and rename, which take everything under a directory with them.
+     */
+    private fun resolveMutable(root: File, path: String?, removesTree: Boolean = false): File {
         if (!ServerFileDenylist.isMutable(path)) {
             throw IllegalArgumentException(ERROR_PATH_DENIED)
         }
@@ -429,6 +432,10 @@ class FileService(
         }
 
         if (real != null && loadedJars.isInUse(real)) {
+            throw InUseException()
+        }
+
+        if (removesTree && loadedJars.isInUseUnder(root, file)) {
             throw InUseException()
         }
 

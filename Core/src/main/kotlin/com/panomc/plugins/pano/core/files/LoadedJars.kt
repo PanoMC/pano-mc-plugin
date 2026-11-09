@@ -2,6 +2,7 @@ package com.panomc.plugins.pano.core.files
 
 import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import java.io.File
+import java.nio.file.Files
 
 /**
  * The jars this server is running out of, which the file manager refuses to change.
@@ -55,6 +56,24 @@ class LoadedJars(private val pluginMain: PanoPluginMain) {
         }
 
         return loadedPluginFileNames().any { it == name }
+    }
+
+    /**
+     * Whether [directory] (inside [root]) holds a jar this server has loaded, at any depth.
+     *
+     * Deleting or renaming `mods/` takes every jar in it along, the plugin's own included, so a
+     * directory is in use whenever anything under it is. Symlinked directories are not entered:
+     * what they point at is not removed with the link.
+     */
+    fun isInUseUnder(root: File, directory: File): Boolean {
+        if (!directory.isDirectory) {
+            return false
+        }
+
+        return directory.walkTopDown()
+            .onEnter { it == directory || !Files.isSymbolicLink(it.toPath()) }
+            .filter { it.isFile && it.name.lowercase().endsWith(JAR_SUFFIX) }
+            .any { isInUse(ZipTool.relativeName(root, it)) }
     }
 
     /** The file names of the plugins or mods this server has loaded, lower-cased. */
