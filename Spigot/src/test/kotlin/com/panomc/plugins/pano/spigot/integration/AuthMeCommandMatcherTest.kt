@@ -58,4 +58,12 @@ class AuthMeCommandMatcherTest {
         assertEquals("authme", command.commandName)
         assertEquals("reg", command.subLabel)
     }
+
+    @Test
+    fun `admin password change is detected and the player's own change is not`() {
+        listOf("/authme password Steve pw", "/authme cp Steve pw", "/authme changepass Steve pw", "/authme:authme CHANGEPASSWORD Steve pw")
+            .forEach { assertEquals(Action.ADMIN_CHANGE_PASSWORD, classify(it), it) }
+
+        assertEquals(Action.NONE, classify("/changepassword old new"))
+    }
 }

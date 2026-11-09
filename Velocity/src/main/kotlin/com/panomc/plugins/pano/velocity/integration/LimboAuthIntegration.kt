@@ -1,5 +1,6 @@
 package com.panomc.plugins.pano.velocity.integration
 
+import com.panomc.plugins.pano.core.auth.PasswordChangeProof
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
 import com.panomc.plugins.pano.core.helper.EventHelper
@@ -10,13 +11,15 @@ import com.panomc.plugins.pano.core.platform.message.response.GetServerSettingsM
 import com.panomc.plugins.pano.core.platform.message.response.IsPlayerRegisteredMessage
 import com.panomc.plugins.pano.core.platform.message.response.PlayerAuthenticateMessage
 import com.panomc.plugins.pano.core.platform.message.response.RegisterPlayerMessage
-import com.panomc.plugins.pano.core.platform.request.ChangePasswordRequest
 import com.panomc.plugins.pano.core.platform.request.GetPlayerInfoRequest
 import com.panomc.plugins.pano.core.platform.request.IsPlayerRegisteredRequest
 import com.panomc.plugins.pano.core.platform.request.PlayerAuthenticateRequest
 import com.panomc.plugins.pano.core.platform.request.RegisterPlayerRequest
 import com.panomc.plugins.pano.velocity.VelocityMain
+import com.velocitypowered.api.event.EventHandler
+import com.velocitypowered.api.event.command.CommandExecuteEvent
 import com.velocitypowered.api.event.connection.PreLoginEvent
+import com.velocitypowered.api.proxy.ConsoleCommandSource
 import com.velocitypowered.api.util.UuidUtils
 import io.vertx.core.http.WebSocket
 import kotlinx.coroutines.runBlocking
@@ -70,6 +73,26 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
 
     private var externalPasswordProvider: ExternalPasswordProvider? = null
 
+    // What a password change can prove to Pano (password-check): the current password LimboAuth
+    // just checked through verifyPassword (/changepassword <old> <new>), or a staff reset seen by
+    // [forceChangePasswordHook].
+    private val passwordChangeProof = PasswordChangeProof()
+
+    // "/forcechangepassword <player> <new>" (LimboAuth's own names for it): a staff reset, which
+    // Pano accepts without the current password. Only someone allowed to run it may claim one.
+    private val forceChangePasswordHook = EventHandler<CommandExecuteEvent> { event ->
+        val parts = event.command.trim().split(Regex("\\s+"))
+        val label = parts.firstOrNull()?.substringAfter(':')?.lowercase()
+
+        if (label in FORCE_CHANGE_PASSWORD_LABELS && parts.size == 3) {
+            val source = event.commandSource
+
+            if (source is ConsoleCommandSource || source.hasPermission(FORCE_CHANGE_PASSWORD_PERMISSION)) {
+                passwordChangeProof.markReset(parts[1])
+            }
+        }
+    }
+
     private var initialized: Boolean = false
 
     // Set once when a plain (non-fork) upstream LimboAuth is detected, so we don't retry and
@@ -115,6 +138,8 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
         takeOverJoinListener()
         takeOverPreLoginListener()
 
+        server.eventManager.register(panoPluginMain, CommandExecuteEvent::class.java, forceChangePasswordHook)
+
         logger.info("&2LimboAuth integration is hooked!".colorize())
     }
 
@@ -137,6 +162,8 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
 
         restoreJoinListener()
         restorePreLoginListener()
+
+        server.eventManager.unregister(panoPluginMain, forceChangePasswordHook)
 
         logger.info("&eLimboAuth integration is disabled.".colorize())
 
@@ -317,6 +344,12 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
                     PlayerAuthenticateMessage::class.java
                 )
 
+                if (authenticateResponse.success) {
+                    // LimboAuth checks the current password this way right before /changepassword
+                    // stores the new one; that change can then prove it to Pano.
+                    passwordChangeProof.rememberVerified(lowercaseNickname, password)
+                }
+
                 authenticateResponse.success
             }
 
@@ -349,7 +382,7 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
                     }
 
                     val response = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
-                        ChangePasswordRequest(lowercaseNickname, newPassword),
+                        passwordChangeProof.request(lowercaseNickname, newPassword),
                         ChangePasswordMessage::class.java
                     )
 
@@ -364,5 +397,8 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
 
     private companion object {
         const val PLATFORM_UNAVAILABLE = "Not connected to Pano Platform"
+
+        val FORCE_CHANGE_PASSWORD_LABELS = setOf("forcechangepassword", "forcechangepass", "fcp")
+        const val FORCE_CHANGE_PASSWORD_PERMISSION = "limboauth.admin.forcechangepassword"
     }
 }

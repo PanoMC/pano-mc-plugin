@@ -19,6 +19,9 @@ object AuthMeCommandMatcher {
         // "/authme reload".
         RELOAD,
 
+        // "/authme password <player> <new>": a staff reset, which Pano accepts without the current password.
+        ADMIN_CHANGE_PASSWORD,
+
         NONE
     }
 
@@ -26,6 +29,7 @@ object AuthMeCommandMatcher {
     val ADMIN_UNREGISTER_LABELS = setOf("unregister", "unreg", "unr")
     val ADMIN_REGISTER_LABELS = setOf("register", "reg", "r")
     val RELOAD_LABELS = setOf("reload", "rld")
+    val ADMIN_CHANGE_PASSWORD_LABELS = setOf("password", "changepassword", "changepass", "cp")
 
     private const val AUTHME_LABEL = "authme"
 
@@ -55,6 +59,7 @@ object AuthMeCommandMatcher {
         command.subLabel in ADMIN_UNREGISTER_LABELS -> Action.ADMIN_UNREGISTER
         command.subLabel in ADMIN_REGISTER_LABELS -> Action.ADMIN_REGISTER
         command.subLabel in RELOAD_LABELS -> Action.RELOAD
+        command.subLabel in ADMIN_CHANGE_PASSWORD_LABELS -> Action.ADMIN_CHANGE_PASSWORD
         else -> Action.NONE
     }
 }

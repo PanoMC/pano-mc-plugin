@@ -1,5 +1,6 @@
 package com.panomc.plugins.pano.spigot.integration
 
+import com.panomc.plugins.pano.core.auth.PasswordChangeProof
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerDisconnect
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerJoin
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
@@ -108,6 +109,11 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
 
     // when register command is called, saved here
     private val pendingRegisterPasswords = ConcurrentHashMap<String, String>()
+
+    // What a password change can prove to Pano (password-check): the current password AuthMe just
+    // checked through authenticateWithPlatform (/changepassword <old> <new>), or a staff reset
+    // seen by the command hooks below.
+    private val passwordChangeProof = PasswordChangeProof()
 
     // playerName.lowercase() entries currently being provisioned with a synthetic AuthMe password
     // (first-join reconcile); handleComputeHash must not treat these as a real password change.
@@ -906,6 +912,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
         }
 
         pendingRegisterPasswords.remove(event.player.name.lowercase())
+        passwordChangeProof.forget(event.player.name)
     }
 
     // Resolves a typed command line to Bukkit's canonical command name (following aliases and the
@@ -993,6 +1000,15 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             }
         }
 
+        if (action == AuthMeCommandMatcher.Action.ADMIN_CHANGE_PASSWORD) {
+            // "<sub-label> <player> <password>"; only staff allowed to run it may claim a reset.
+            if (command.args.size == 3 && event.player.hasPermission("authme.admin.changepassword")) {
+                passwordChangeProof.markReset(command.args[1])
+            }
+
+            return
+        }
+
         if (action == AuthMeCommandMatcher.Action.RELOAD) {
             // If player doesn't have permission, let AuthMe handle the permission check
             if (!event.player.hasPermission("authme.admin.reload")) {
@@ -1072,6 +1088,14 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             }
         }
 
+        if (action == AuthMeCommandMatcher.Action.ADMIN_CHANGE_PASSWORD) {
+            if (command.args.size == 3) {
+                passwordChangeProof.markReset(command.args[1])
+            }
+
+            return
+        }
+
         if (action == AuthMeCommandMatcher.Action.RELOAD) {
             authMePlugin.reloadConfig()
 
@@ -1129,7 +1153,7 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
                 AuthMeHashDecision.Action.CHANGE_PASSWORD -> Unit
             }
 
-            val request = ChangePasswordRequest(playerName, password)
+            val request = passwordChangeProof.request(playerName, password)
 
             val changePasswordResponse = platformManager.sendMessageAwaitResponse<ChangePasswordMessage>(
                 request,
@@ -1141,18 +1165,35 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
             }
 
             logger.severe("&cAn error occurred during the changing password of \"$playerName\": ${changePasswordResponse.error}".colorize())
-            return@runBlocking
+
+            // Pano kept the old password (for example it could not confirm the current one): tell
+            // the player instead of letting AuthMe report a change that did not happen.
+            Bukkit.getPlayerExact(playerName)?.let { player ->
+                SpigotServerUtil.runPlayerTask(panoPluginMain, player) {
+                    player.sendMessage("&cYour password could not be changed here. Please change it on the website.".colorize())
+                }
+            }
+
+            throw IllegalStateException("Pano refused the password change: ${changePasswordResponse.error}")
         }
     }
 
     private fun authenticateWithPlatform(playerName: String, password: String): Boolean = runBlocking {
-        platformManager.sendMessageAwaitResponse<PlayerAuthenticateMessage>(
+        val success = platformManager.sendMessageAwaitResponse<PlayerAuthenticateMessage>(
             PlayerAuthenticateRequest(
                 playerName,
                 password
             ),
             PlayerAuthenticateMessage::class.java
         ).success
+
+        if (success) {
+            // AuthMe checks the current password this way right before /changepassword hashes the
+            // new one; that change can then prove it to Pano.
+            passwordChangeProof.rememberVerified(playerName, password)
+        }
+
+        success
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
