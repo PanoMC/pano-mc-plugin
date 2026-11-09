@@ -177,13 +177,13 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
 
         // A staged self-update the last shutdown could not swap in (the process was killed, or the
         // jar was locked) is finished here; it loads on the next restart (AGENT.md B3).
-        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
+        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger, runCatching { getOwnJarFile() }.getOrNull())
 
         // STOPPED rather than STOPPING: by then the worlds are saved and Pano is torn down, so
         // nothing is still loading classes from the jar being replaced. Fabric has no update
         // folder, so this is where a staged self-update swaps in, keeping the old jar as .bak.
         ServerLifecycleEvents.SERVER_STOPPED.register { _ ->
-            PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
+            PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger, runCatching { getOwnJarFile() }.getOrNull())
         }
 
         ServerLifecycleEvents.SERVER_STARTED.register { server ->

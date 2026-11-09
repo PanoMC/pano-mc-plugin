@@ -142,7 +142,7 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
         // A staged self-update the last shutdown could not swap in (the process was killed, or the
         // jar was locked) is finished here; it loads on the next restart (AGENT.md B3).
-        PanoSelfUpdate.applyPendingSwap(dataFolder, logger)
+        PanoSelfUpdate.applyPendingSwap(dataFolder, logger, runCatching { getOwnJarFile() }.getOrNull())
 
         coroutineScope = CoroutineScope(
             SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, throwable ->
@@ -247,7 +247,7 @@ class BungeeMain : Plugin(), PanoPluginMain {
 
         // After everything else, with Vert.x closed: BungeeCord has no update folder, so a staged
         // self-update replaces this plugin's own jar now, keeping the old one as .bak (AGENT.md B3).
-        PanoSelfUpdate.applyPendingSwap(dataFolder, logger)
+        PanoSelfUpdate.applyPendingSwap(dataFolder, logger, runCatching { getOwnJarFile() }.getOrNull())
     }
 
     override fun registerCommands(commands: List<Command>) {

@@ -29,6 +29,18 @@ class ServerFileDenylistTest {
     }
 
     @Test
+    fun `hides the self-update staging folder and the stored schedules`() {
+        listOf("plugins/Pano", "plugins/pano", "config/pano").forEach { folder ->
+            assertTrue(ServerFileDenylist.isDenied("$folder/update"))
+            assertTrue(ServerFileDenylist.isDenied("$folder/update/pending-swap.json"))
+            assertTrue(ServerFileDenylist.isDenied("$folder/update/x.jar"))
+            assertTrue(ServerFileDenylist.isDenied("$folder/schedules.json"))
+        }
+
+        assertFalse(ServerFileDenylist.isDenied("plugins/update/Pano.jar"))
+    }
+
+    @Test
     fun `hides key material and the proxy forwarding secret`() {
         assertTrue(ServerFileDenylist.isDenied("forwarding.secret"))
         assertTrue(ServerFileDenylist.isDenied("certs/fullchain.pem"))

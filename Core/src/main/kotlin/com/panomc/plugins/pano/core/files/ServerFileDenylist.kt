@@ -31,6 +31,16 @@ object ServerFileDenylist {
         "plugins/Pano/config.conf",
         "plugins/pano/config.conf",
         "config/pano/config.conf",
+        // The self-update staging folder and its swap marker: a hand-written marker would tell the
+        // next shutdown which jar to move where.
+        "plugins/Pano/update",
+        "plugins/pano/update",
+        "config/pano/update",
+        // The schedules this server keeps running while Pano is away; they are managed from the
+        // panel's schedule page, never edited as a file.
+        "plugins/Pano/schedules.json",
+        "plugins/pano/schedules.json",
+        "config/pano/schedules.json",
         // Velocity's player-forwarding secret: whoever holds it can join any backend as anyone.
         "forwarding.secret",
         // The snapshot repository. Chunks are named by their own hash and manifests by the backup

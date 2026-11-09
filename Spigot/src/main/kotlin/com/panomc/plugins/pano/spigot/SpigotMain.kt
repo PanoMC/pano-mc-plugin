@@ -165,7 +165,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         // A self-update normally goes through plugins/update/ and never leaves a swap behind; one
         // that fell back to swapping (no update folder could be resolved) and was interrupted
         // before the server stopped cleanly is finished here instead (AGENT.md B3).
-        PanoSelfUpdate.applyPendingSwap(dataFolder, mPanoLogger)
+        PanoSelfUpdate.applyPendingSwap(dataFolder, mPanoLogger, runCatching { getOwnJarFile() }.getOrNull())
     }
 
     override fun onEnable() {
@@ -310,7 +310,7 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
         // Last, after Vert.x is closed and nothing of Pano's is still reading its own jar: a
         // staged self-update that could not use plugins/update/ swaps in now (AGENT.md B3). A
         // no-op on the ordinary Bukkit route, which leaves no swap behind.
-        PanoSelfUpdate.applyPendingSwap(dataFolder, mPanoLogger)
+        PanoSelfUpdate.applyPendingSwap(dataFolder, mPanoLogger, runCatching { getOwnJarFile() }.getOrNull())
     }
 
     /**

@@ -238,7 +238,7 @@ object PanoSelfUpdate {
      * nobody checked. A marker that names a file outside the staging directory, a target that is not
      * a jar, or a staged file that is gone or changed is dropped rather than trusted.
      */
-    fun applyPendingSwap(dataFolder: File, logger: Logger): SwapOutcome {
+    fun applyPendingSwap(dataFolder: File, logger: Logger, ownJar: File? = null): SwapOutcome {
         val swap = readSwap(dataFolder) ?: run {
             // Still clear a marker that exists but cannot be read, or it would be read again forever.
             clearSwap(dataFolder)
@@ -247,7 +247,7 @@ object PanoSelfUpdate {
         }
 
         return try {
-            applySwap(dataFolder, swap, logger)
+            applySwap(dataFolder, swap, logger, ownJar)
         } catch (exception: Throwable) {
             logger.warning("Could not apply the staged Pano update: ${exception.javaClass.simpleName}: ${exception.message}")
 
@@ -255,7 +255,7 @@ object PanoSelfUpdate {
         }
     }
 
-    private fun applySwap(dataFolder: File, swap: PendingSwap, logger: Logger): SwapOutcome {
+    private fun applySwap(dataFolder: File, swap: PendingSwap, logger: Logger, ownJar: File?): SwapOutcome {
         val staged = swap.staged?.let { File(it) }
         val target = swap.target?.let { File(it) }
         val expected = swap.sha256?.trim()?.takeIf { it.isNotEmpty() }
@@ -264,7 +264,10 @@ object PanoSelfUpdate {
 
         if (staged == null || target == null || expected == null ||
             staged.canonicalFile.parentFile != stagingDirectory ||
-            !target.name.lowercase().endsWith(".jar")
+            !target.name.lowercase().endsWith(".jar") ||
+            // A swap only ever replaces the jar this plugin runs from; any other target is not one
+            // this plugin recorded.
+            (ownJar != null && target.canonicalFile != ownJar.canonicalFile)
         ) {
             logger.warning("Dropped a pending Pano update whose marker did not describe a staged jar.")
 
@@ -285,7 +288,7 @@ object PanoSelfUpdate {
             return SwapOutcome.DISCARDED
         }
 
-        if (!Sha256.of(staged).equals(expected, ignoreCase = true)) {
+        if (!Sha256.of(staged).equals(expected, ignoreCase = true) || !ZipTool.isZip(staged)) {
             logger.warning("Dropped a pending Pano update: ${staged.name} no longer matches its checksum.")
 
             staged.delete()

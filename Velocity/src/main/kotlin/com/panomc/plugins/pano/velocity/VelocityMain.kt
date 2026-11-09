@@ -153,7 +153,7 @@ class VelocityMain : PanoPluginMain {
 
         // A staged self-update the last shutdown could not swap in (the process was killed, or the
         // jar was locked) is finished here; it loads on the next restart (AGENT.md B3).
-        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
+        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger, runCatching { getOwnJarFile() }.getOrNull())
 
         onEnable()
     }
@@ -165,7 +165,7 @@ class VelocityMain : PanoPluginMain {
         // Only on a real shutdown, never on the reload below: Velocity has no update folder, so a
         // staged self-update replaces this plugin's own jar here, after Pano is fully torn down,
         // keeping the old one as .bak (AGENT.md B3).
-        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger)
+        PanoSelfUpdate.applyPendingSwap(getDataFolder(), logger, runCatching { getOwnJarFile() }.getOrNull())
     }
 
     @Subscribe

@@ -222,6 +222,31 @@ class SelfUpdateTest {
         assertTrue(elsewhere.exists())
     }
 
+    @Test
+    fun `a marker whose target is not this plugin's own jar moves nothing`() {
+        service(pluginMain(updateFolder = null)).update(message())
+
+        val swap = assertNotNull(PanoSelfUpdate.readSwap(dataFolder()))
+        val other = File(root, "other-server/plugins/evil.jar")
+
+        PanoSelfUpdate.recordSwap(dataFolder(), swap.copy(target = other.absolutePath))
+
+        assertEquals(
+            PanoSelfUpdate.SwapOutcome.DISCARDED,
+            PanoSelfUpdate.applyPendingSwap(dataFolder(), logger, ownJar)
+        )
+        assertFalse(other.exists())
+        assertContentEquals(oldBytes, ownJar.readBytes())
+    }
+
+    @Test
+    fun `the swap still happens when the target is this plugin's own jar`() {
+        service(pluginMain(updateFolder = null)).update(message())
+
+        assertEquals(PanoSelfUpdate.SwapOutcome.APPLIED, PanoSelfUpdate.applyPendingSwap(dataFolder(), logger, ownJar))
+        assertContentEquals(newBytes, ownJar.readBytes())
+    }
+
     // --- the Bukkit route ----------------------------------------------------------------------
 
     @Test
