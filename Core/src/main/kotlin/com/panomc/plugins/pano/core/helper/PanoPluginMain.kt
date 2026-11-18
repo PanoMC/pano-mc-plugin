@@ -152,6 +152,12 @@ interface PanoPluginMain {
      */
     fun getMspt(): Double? = null
 
+    /**
+     * Whether the game is paused right now because nobody is online (`pause-when-empty-seconds`),
+     * which is why [getTps] falls towards zero then. Null where the platform cannot tell.
+     */
+    fun isPausedWhenEmpty(): Boolean? = null
+
     /** The players online right now, with their ping. Empty on a platform that has no roster. */
     fun getOnlinePlayers(): List<PlayerData> = emptyList()
 

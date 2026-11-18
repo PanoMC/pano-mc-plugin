@@ -899,6 +899,8 @@ class SpigotMain : JavaPlugin(), PanoPluginMain {
 
     override fun getMspt(): Double? = spigotMetrics.getMspt()
 
+    override fun isPausedWhenEmpty(): Boolean? = spigotMetrics.isPausedWhenEmpty()
+
     override fun getOnlinePlayers(): List<PlayerData> = try {
         Bukkit.getOnlinePlayers().map {
             PlayerData(

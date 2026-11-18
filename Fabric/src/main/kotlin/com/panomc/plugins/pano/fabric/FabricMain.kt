@@ -11,6 +11,7 @@ import com.panomc.plugins.pano.core.helper.PanoPluginMain
 import com.panomc.plugins.pano.core.helper.ServerData
 import com.panomc.plugins.pano.core.integration.BanIntegration
 import com.panomc.plugins.pano.core.integration.PermissionIntegration
+import com.panomc.plugins.pano.core.metrics.PauseWhenEmpty
 import com.panomc.plugins.pano.core.metrics.TickSampler
 import com.panomc.plugins.pano.core.platform.Capability
 import com.panomc.plugins.pano.core.platform.entity.InstalledPlugin
@@ -729,6 +730,8 @@ class FabricMain : DedicatedServerModInitializer, PanoPluginMain {
     } catch (_: Throwable) {
         null
     }
+
+    override fun isPausedWhenEmpty(): Boolean? = server?.let { PauseWhenEmpty.isPaused(it) }
 
     override fun getOnlinePlayers(): List<PlayerData> {
         val server = this.server ?: return emptyList()

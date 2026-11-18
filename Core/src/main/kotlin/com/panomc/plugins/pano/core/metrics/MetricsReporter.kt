@@ -253,7 +253,8 @@ class MetricsReporter(
             // Never measured here: this only reads the last walk's result and asks for a new one
             // when it has gone stale (see DiskUsageProbe). Null until the first one lands.
             diskUsed = safely<Long?>(null) { diskUsage.read() },
-            diskTotal = readDiskTotal()
+            diskTotal = readDiskTotal(),
+            paused = safely<Boolean?>(null) { pluginMain.isPausedWhenEmpty() }
         )
     }
 

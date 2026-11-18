@@ -1,5 +1,6 @@
 package com.panomc.plugins.pano.spigot
 
+import com.panomc.plugins.pano.core.metrics.PauseWhenEmpty
 import com.panomc.plugins.pano.core.metrics.TickSampler
 import org.bukkit.Bukkit
 import org.bukkit.plugin.Plugin
@@ -72,6 +73,15 @@ class SpigotMetrics(private val plugin: Plugin) {
         ?: if (samplerTaskId != -1) tickSampler.getTps() else null
 
     fun getMspt(): Double? = readApiMspt()
+
+    /** Paper (Mojang-mapped) only; obfuscated Spigot cannot tell and answers null. */
+    fun isPausedWhenEmpty(): Boolean? = try {
+        val server = Bukkit.getServer()
+
+        server.javaClass.getMethod("getServer").invoke(server)?.let { PauseWhenEmpty.isPaused(it) }
+    } catch (_: Throwable) {
+        null
+    }
 
     private fun readApiTps(): DoubleArray? = try {
         val server = Bukkit.getServer()

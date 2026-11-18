@@ -30,5 +30,7 @@ data class ServerMetricsRequest(
     val maxPlayerCount: Int,
     val players: List<PlayerData>,
     val diskUsed: Long? = null,
-    val diskTotal: Long? = null
+    val diskTotal: Long? = null,
+    /** True while the game is paused because nobody is online; null where that cannot be told. Additive. */
+    val paused: Boolean? = null
 ) : PlatformRequest()
