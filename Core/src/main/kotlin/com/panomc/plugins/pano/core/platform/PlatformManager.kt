@@ -882,8 +882,15 @@ class PlatformManager(
 
         val webSocket: WebSocket
 
+        // The handler exists before the connection does: Pano writes the moment it accepts, and a
+        // frame that arrives while the channel is still being agreed must wait, not be dropped.
+        val frameGate = FrameGate()
+
         try {
-            webSocket = webSocketClient.connect(webSocketConnectOptions).coAwait()
+            webSocket = webSocketClient.webSocket()
+                .textMessageHandler { frame -> frameGate.receive(frame) }
+                .connect(webSocketConnectOptions)
+                .coAwait()
         } catch (exception: Exception) {
             if (exception is UpgradeRejectedException) {
                 // The rejecting party (a reverse proxy returning a 502 HTML page, for example)
@@ -926,6 +933,8 @@ class PlatformManager(
         } catch (exception: Exception) {
             logger.severe(pluginMain.translateColor("&cError: Refused the connection to Pano Platform: ${exception.message}"))
 
+            frameGate.close()
+
             try {
                 webSocket.close().coAwait()
             } catch (_: Exception) {
@@ -942,9 +951,10 @@ class PlatformManager(
 
         this.webSocket = webSocket
 
-        webSocket.textMessageHandler { frame ->
-            // Opened here, in arrival order on the socket's own thread, because channel v2 frames
-            // must be read in exactly the order they were sent; only the handling is launched.
+        // The frames that arrived while the channel was agreed first, then the rest as they come.
+        frameGate.open { frame ->
+            // Opened here, in arrival order, because channel v2 frames must be read in exactly the
+            // order they were sent; only the handling is launched.
             val text = try {
                 openFrame(negotiatedChannel, frame)
             } catch (exception: SecurityException) {
@@ -954,16 +964,18 @@ class PlatformManager(
 
                 webSocket.close()
 
-                return@textMessageHandler
+                return@open false
             } catch (exception: Exception) {
                 logger.severe("Failed to process platform message (${exception.javaClass.simpleName}): ${exception.message}")
 
-                return@textMessageHandler
+                return@open true
             }
 
             CoroutineScope(vertx.dispatcher()).launch {
                 onWebsocketTextMessage(text)
             }
+
+            true
         }
 
         webSocket.closeHandler {
