@@ -10,12 +10,15 @@ import com.panomc.plugins.pano.core.platform.request.OnPlayerDisconnectRequest
 class OnPlayerDisconnect(private val platformManager: PlatformManager, private val pluginMain: PanoPluginMain) :
     Listener {
     override suspend fun handle(eventHelper: EventHelper, vararg args: Any) {
+        val player = args[0]
+        val playerData = eventHelper.convertToPlayerData(player)
+
+        // forgotten whether or not the platform is reachable: the next login asks again
+        com.panomc.plugins.pano.core.platform.PlatformExtensions.forgetPlayer(playerData.username)
+
         if (platformManager.getWebSocket() == null) {
             return
         }
-
-        val player = args[0]
-        val playerData = eventHelper.convertToPlayerData(player)
 
         var playerCount = pluginMain.getServerData().playerCount()
 

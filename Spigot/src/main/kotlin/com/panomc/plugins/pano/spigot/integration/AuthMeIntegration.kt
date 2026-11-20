@@ -166,6 +166,8 @@ class AuthMeIntegration(override val panoPluginMain: SpigotMain) : Integration, 
                                 GetPlayerInfoMessage::class.java
                             )
 
+                        com.panomc.plugins.pano.core.platform.PlatformExtensions.rememberPlayer(playerName, playerInfo.locale)
+
                         // serverSettings is lateinit and only assigned at the very end of
                         // onConnectionEstablished(), after `webSocket` (the field the allow-gate above
                         // reads) is already published - a pre-login landing in that window would

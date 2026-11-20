@@ -362,7 +362,13 @@ class PlatformManager(
         InstallPluginHandler(fileAgent, this, pluginInstallService, logger),
         SyncSchedulesHandler(scheduleRunner, logger),
         PanoPluginUpdateHandler(selfUpdateService, logger)
-    )
+    ).also { builtIns -> BUILT_IN_HANDLER_NAMES = builtIns.map { it.getHandlerName() }.toSet() }
+
+    /** Same as [PlatformExtensions.registerMessageHandler]: the registration outlives this manager. */
+    fun registerMessageHandler(handler: PlatformMessageHandler<*>): Boolean = PlatformExtensions.registerMessageHandler(handler)
+
+    /** Same as [PlatformExtensions.unregisterMessageHandler]. */
+    fun unregisterMessageHandler(handler: PlatformMessageHandler<*>): Boolean = PlatformExtensions.unregisterMessageHandler(handler)
 
     val connectPlatformTask: (delay: Boolean, async: Boolean) -> Unit by lazy {
         { delay, async ->
@@ -1019,6 +1025,7 @@ class PlatformManager(
             webSocket.textMessageHandler(null)
 
             this.webSocket = null
+            PlatformExtensions.connectionChanged(false)
 
             try {
                 webSocket.close().coAwait()
@@ -1032,6 +1039,9 @@ class PlatformManager(
         // completed - starting any earlier would let the periodic ping/timeout race the
         // handshake itself (platform-core-heartbeat).
         startHeartbeat(webSocket)
+
+        // the handshake is done: other plugins may send from now on
+        PlatformExtensions.connectionChanged(true)
 
         return ConnectOutcome.CONNECTED
     }
@@ -1216,7 +1226,8 @@ class PlatformManager(
                 json.put("eventId", rawEventId)
             }
 
-            messageHandlerDefinitions.find { it.getHandlerName() == event }?.let {
+            // the built-in handlers first: another plugin's handler can never take over one of their events
+            (messageHandlerDefinitions.find { it.getHandlerName() == event } ?: PlatformExtensions.handler(event))?.let {
                 val messageObj = Pano.gson.fromJson(json.encode(), it.messageClass)
 
                 @Suppress("UNCHECKED_CAST")
@@ -1241,6 +1252,7 @@ class PlatformManager(
         cancelHeartbeat()
 
         webSocket = null
+        PlatformExtensions.connectionChanged(false)
 
         connectedAt = 0
         lastRoundTripMillis = null
@@ -1721,6 +1733,10 @@ class PlatformManager(
     }
 
     companion object {
+        /** The events of the built-in handlers (set by the first manager): never available to other plugins. */
+        @Volatile
+        internal var BUILT_IN_HANDLER_NAMES: Set<String> = emptySet()
+
         /** Stands in for the code of an error answer that carried none. */
         private const val UNKNOWN_ERROR = "UNKNOWN"
 

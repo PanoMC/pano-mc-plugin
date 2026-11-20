@@ -1,5 +1,6 @@
 package com.panomc.plugins.pano.core.integration
 
+import com.panomc.plugins.pano.core.platform.PlatformExtensions
 import com.panomc.plugins.pano.core.event.listeners.OnPlayerPreLogin
 import com.panomc.plugins.pano.core.helper.EventHelper
 import com.panomc.plugins.pano.core.helper.Integration
@@ -55,6 +56,9 @@ class BanIntegration(override val panoPluginMain: PanoPluginMain) : Integration 
                         GetPlayerInfoRequest(username),
                         GetPlayerInfoMessage::class.java
                     )
+
+                    // the account's language, for this plugin and the others on the server, until the player leaves
+                    PlatformExtensions.rememberPlayer(username, playerInfo.locale)
 
                     if (!playerInfo.banned) {
                         return

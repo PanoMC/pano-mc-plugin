@@ -288,6 +288,8 @@ class LimboAuthIntegration(override val panoPluginMain: VelocityMain) : Integrat
             GetPlayerInfoMessage::class.java
         )
 
+        com.panomc.plugins.pano.core.platform.PlatformExtensions.rememberPlayer(playerName, playerInfo.locale)
+
         val registeredInLimboAuth = limboAuth.isRegistered(playerName)
 
         if (playerInfo.registered && !registeredInLimboAuth) {
