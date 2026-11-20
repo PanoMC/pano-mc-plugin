@@ -177,12 +177,18 @@ class SnapshotRepository(val directory: File) {
         try {
             return block()
         } finally {
-            lockFile.delete()
+            // Deleted while still held, so on POSIX nobody can lock this file between our release and
+            // the delete and then lose it. Windows refuses to delete an open file: there the delete is
+            // tried again once the channel is closed (a file another process opened meanwhile is
+            // still refused, so its lock stays intact).
+            val deleted = lockFile.delete()
 
             try {
                 lock.release()
             } finally {
                 channel.close()
+
+                if (!deleted) lockFile.delete()
             }
         }
     }

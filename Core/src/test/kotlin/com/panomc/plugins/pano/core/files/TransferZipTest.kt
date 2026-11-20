@@ -124,7 +124,14 @@ class TransferZipTest {
         try {
             File(outside, "secret.txt").writeText("host file")
 
-            Files.createSymbolicLink(File(root, "plugins/LuckPerms/escape").toPath(), outside.toPath())
+            try {
+                Files.createSymbolicLink(File(root, "plugins/LuckPerms/escape").toPath(), outside.toPath())
+            } catch (e: java.io.IOException) {
+                // Windows without Developer Mode or admin rights cannot create one: nothing to test there.
+                org.junit.jupiter.api.Assumptions.assumeTrue(false, "symbolic links cannot be created here: ${e.message}")
+            } catch (e: UnsupportedOperationException) {
+                org.junit.jupiter.api.Assumptions.assumeTrue(false, "symbolic links are not supported here")
+            }
 
             val entries = zip("plugins", listOf("plugins/LuckPerms"))
 
